@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@theme {
+  --font-montserrat: 'Montserrat', sans-serif;
+}
+
+:root {
+  --background: #fafaf9; /* Stone-50 */
+  --foreground: #1c1917; /* Stone-900 */
+}
+
+/* Custom Scrollbar for better aesthetics */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #f5f5f4; 
+}
+::-webkit-scrollbar-thumb {
+    background: #d6d3d1; 
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #a8a29e; 
+}
+
+/* Print Styles */
+@media print {
+    @page {
+        margin: 1.0cm;
+        size: A4;
+    }
+    
+    body {
+        background-color: white;
+        color: black;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    /* Hide UI elements */
+    .no-print, nav, aside, button, input, .scrollbar-hide::-webkit-scrollbar {
+        display: none !important;
+    }
+
+    /* Hide the modal if open */
+    .fixed.z-50 {
+        display: none !important;
+    }
+
+    /* Ensure main content takes full width */
+    #root, main, .max-w-7xl {
+        max-width: 100% !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        overflow: visible !important;
+        height: auto !important;
+        display: block !important;
+    }
+
+    h1, h2, h3 {
+        color: #000 !important;
+    }
+    
+    p, li, span {
+        color: #222 !important;
+    }
+
+    .print-only {
+        display: block !important;
+    }
+    
+    .grid {
+        display: block !important;
+    }
+    
+    .recipe-card-print {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        border: 1px solid #ddd !important;
+        margin-bottom: 20px;
+        border-radius: 8px;
+        padding: 15px;
+        box-shadow: none !important;
+    }
+
+    .shopping-list-print {
+        page-break-before: always;
+        break-before: page;
+    }
+}
