@@ -22,5 +22,6 @@ export const familyMemberSchema = z.object({
 export const generatePlanSchema = z.object({
     inventory: z.array(ingredientSchema).min(1, "Добавьте хотя бы один продукт"),
     family: z.array(familyMemberSchema).min(1, "Добавьте хотя бы одного члена семьи"),
-    onlyFridge: z.boolean().default(false)
+    onlyFridge: z.boolean().default(false),
+    categories: z.array(z.enum(['breakfast', 'salad', 'soup', 'main', 'dessert', 'drink'])).min(1, "Выберите хотя бы одну категорию"),
 });

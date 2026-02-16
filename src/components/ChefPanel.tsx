@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { ChefHat, ShoppingCart, Clock, TrendingUp, CheckCircle, Loader2, Send, Bookmark, Scale, Utensils, ChevronDown, ChevronUp, Sun, Moon, Coffee, Soup, CheckSquare, Square, User, Users, Copy, Star, Eye, EyeOff, Share2, Download, ExternalLink, Printer, Image as ImageIcon, PlusCircle, StickyNote, Mail, PackagePlus, Zap, Check } from 'lucide-react';
-import { ChefPlan, FamilyMember, Ingredient, Recipe, ShoppingItem } from '@/lib/types';
-import { generateChefPlan } from '@/app/actions/generate';
+import { ChefPlan, FamilyMember, Ingredient, Recipe, ShoppingItem, MealCategory, MEAL_CATEGORIES } from '@/lib/types';
+import { generateChefPlan } from '@/app/actions/ai';
 
 interface ChefPanelProps {
     inventory: Ingredient[];
@@ -21,6 +21,13 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
     const [showShoppingList, setShowShoppingList] = useState(false);
     const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
     const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
+    const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'soup', 'main', 'dessert']);
+
+    const toggleCategory = (cat: MealCategory) => {
+        setSelectedCategories(prev =>
+            prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+        );
+    };
 
     // Таймер ожидания генерации
     useEffect(() => {
@@ -51,12 +58,17 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
         setShowShoppingList(false);
 
         try {
-            const result = await generateChefPlan(inventory, family, onlyFridge);
-            setPlan(result);
-            setGenerationState('success');
+            const result = await generateChefPlan(inventory, family, onlyFridge, selectedCategories);
+            if (result.success) {
+                setPlan(result.data);
+                setGenerationState('success');
+            } else {
+                setErrorMessage(result.error);
+                setGenerationState('error');
+            }
         } catch (error: any) {
             console.error("Generation failed:", error);
-            setErrorMessage(error?.message || 'Неизвестная ошибка');
+            setErrorMessage('Ошибка соединения с сервером. Попробуйте ещё раз.');
             setGenerationState('error');
         }
     };
@@ -175,24 +187,51 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
             </div>
 
             {!plan ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 bg-stone-50/50 rounded-2xl border-2 border-dashed border-gray-200 m-4">
-                    <div className="bg-white p-6 rounded-full shadow-sm mb-2">
-                        <Zap size={48} className="text-yellow-400 fill-current" />
+                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 bg-stone-50/50 rounded-2xl border-2 border-dashed border-gray-200 m-4 p-6">
+                    <div className="bg-white p-5 rounded-full shadow-sm mb-1">
+                        <Zap size={44} className="text-yellow-400 fill-current" />
                     </div>
 
-                    <div className="max-w-sm mx-auto">
-                        <h3 className="text-lg font-bold text-gray-700 mb-2">Готов творить магию!</h3>
-                        <p className="text-gray-500 mb-6 text-sm leading-relaxed">Нажми кнопку, и я составлю идеальное меню на основе твоих продуктов и целей семьи.</p>
+                    <div className="max-w-md mx-auto w-full">
+                        <h3 className="text-lg font-bold text-gray-700 mb-1">Что приготовить?</h3>
+                        <p className="text-gray-400 mb-4 text-sm">Выберите категории блюд для генерации</p>
+
+                        {/* Чекбоксы категорий */}
+                        <div className="grid grid-cols-2 gap-2 mb-6 text-left">
+                            {MEAL_CATEGORIES.map(cat => {
+                                const isSelected = selectedCategories.includes(cat.id);
+                                return (
+                                    <button
+                                        key={cat.id}
+                                        type="button"
+                                        onClick={() => toggleCategory(cat.id)}
+                                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-medium ${isSelected
+                                            ? 'border-orange-300 bg-orange-50 text-orange-700 shadow-sm'
+                                            : 'border-gray-100 bg-white text-gray-400 hover:border-gray-200 hover:bg-gray-50'
+                                            }`}
+                                    >
+                                        <span className="text-lg">{cat.emoji}</span>
+                                        <span className="flex-1">{cat.label}</span>
+                                        {isSelected ? (
+                                            <CheckSquare size={16} className="text-orange-500 flex-shrink-0" />
+                                        ) : (
+                                            <Square size={16} className="text-gray-300 flex-shrink-0" />
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
 
                         <button
                             onClick={handleGenerate}
-                            disabled={inventory.length === 0}
+                            disabled={inventory.length === 0 || selectedCategories.length === 0}
                             className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-lg font-bold py-4 px-8 rounded-xl shadow-xl shadow-orange-200 transition-transform active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group"
                         >
                             <ChefHat className="group-hover:rotate-12 transition-transform" />
                             СОСТАВИТЬ МЕНЮ
                         </button>
                         {inventory.length === 0 && <p className="text-red-400 text-xs mt-3 font-medium">Сначала добавьте продукты в холодильник!</p>}
+                        {selectedCategories.length === 0 && <p className="text-red-400 text-xs mt-3 font-medium">Выберите хотя бы одну категорию!</p>}
                     </div>
                 </div>
             ) : (

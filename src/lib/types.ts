@@ -1,4 +1,16 @@
 
+// Категории блюд для генерации
+export type MealCategory = 'breakfast' | 'salad' | 'soup' | 'main' | 'dessert' | 'drink';
+
+export const MEAL_CATEGORIES: { id: MealCategory; label: string; emoji: string; count: string }[] = [
+  { id: 'breakfast', label: 'Завтраки', emoji: '🍳', count: '1-2' },
+  { id: 'salad', label: 'Салаты и закуски', emoji: '🥗', count: '1-2' },
+  { id: 'soup', label: 'Первые блюда', emoji: '🍲', count: '1' },
+  { id: 'main', label: 'Вторые блюда', emoji: '🥩', count: '1-2' },
+  { id: 'dessert', label: 'Выпечка и десерты', emoji: '🍰', count: '1' },
+  { id: 'drink', label: 'Напитки', emoji: '🥤', count: '1' },
+];
+
 export enum GoalType {
   WEIGHT_LOSS = 'Похудение',
   MAINTENANCE = 'Поддержание веса',
@@ -68,7 +80,7 @@ export interface Recipe {
   ingredientsToUse: string[];
   missingIngredients: string[];
   healthBenefits: string; // Why this fits the family goals
-  
+
   // Nutrition & Weights
   weightPerServing: string; // e.g. "350g"
   totalWeightForFamily: string; // e.g. "1.5 kg"
@@ -76,7 +88,7 @@ export interface Recipe {
   protein: string;
   fats: string;
   carbs: string;
-  
+
   // Personalization
   familySuitability: Suitability[];
 

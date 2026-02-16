@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { Ingredient, Category } from '@/lib/types';
 import { Plus, Trash2, Camera, Loader2, Apple, Milk, Beef, Wheat, Snowflake, Package, ChevronDown, Check } from 'lucide-react';
-import { recognizeIngredients } from '@/app/actions/generate';
+import { recognizeIngredients } from '@/app/actions/ai';
 
 interface FridgePanelProps {
     inventory: Ingredient[];
