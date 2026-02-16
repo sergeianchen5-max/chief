@@ -7,51 +7,55 @@ import { generatePlanSchema } from "@/lib/schemas";
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Бесплатные модели (в порядке приоритета)
+// Быстрые бесплатные модели (в порядке приоритета)
 const MODELS = [
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "deepseek/deepseek-r1-0528:free",
-    "google/gemma-3-1b-it:free",
-    "microsoft/phi-4-reasoning:free",
-    "nvidia/llama-3.1-nemotron-nano-12b-v1:free",
+    "google/gemini-2.0-flash-lite-preview-02-05:free", // Самая быстрая
+    "google/gemini-2.0-pro-exp-02-05:free",           // Умная (Google)
+    "meta-llama/llama-3.3-70b-instruct:free",         // Llama 70B
+    "mistralai/mistral-7b-instruct:free",             // Mistral 7B
 ];
 
-// Задержка в мс
+// URL сайта для Referer
+const SITE_URL = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://schef-xi.vercel.app";
+
 function sleep(ms: number) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function callOpenRouter(userPrompt: string): Promise<string> {
+async function callOpenRouter(systemPrompt: string, userPrompt: string): Promise<string> {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
         throw new Error("OPENROUTER_API_KEY не задан в .env.local");
     }
 
-    // Пробуем каждую модель, при 429 делаем retry
     for (let modelIdx = 0; modelIdx < MODELS.length; modelIdx++) {
         const model = MODELS[modelIdx];
 
-        for (let attempt = 0; attempt < 2; attempt++) { // 2 попытки на модель
+        for (let attempt = 0; attempt < 2; attempt++) {
             console.log(`[OpenRouter] 🚀 ${model} (модель ${modelIdx + 1}/${MODELS.length}, попытка ${attempt + 1})`);
 
             try {
                 const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 120000);
+                const timeout = setTimeout(() => controller.abort(), 45000); // 45 секунд
 
                 const response = await fetch(OPENROUTER_API_URL, {
                     method: "POST",
                     headers: {
                         "Authorization": `Bearer ${apiKey}`,
                         "Content-Type": "application/json",
-                        "HTTP-Referer": "http://localhost:3000",
+                        "HTTP-Referer": SITE_URL,
                         "X-Title": "Schef Fridge",
                     },
                     body: JSON.stringify({
                         model,
-                        messages: [{ role: "user", content: userPrompt }],
-                        temperature: 0.7,
-                        max_tokens: 8000,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt },
+                        ],
+                        temperature: 0.5,
+                        max_tokens: 4000,
                     }),
                     signal: controller.signal,
                 });
@@ -59,9 +63,9 @@ async function callOpenRouter(userPrompt: string): Promise<string> {
                 clearTimeout(timeout);
 
                 if (response.status === 429) {
-                    console.warn(`[OpenRouter] ⏳ 429 от ${model}. Ждём 10 сек...`);
-                    await sleep(10000);
-                    continue; // retry та же модель
+                    console.warn(`[OpenRouter] ⏳ 429 от ${model}. Ждём 3 сек...`);
+                    await sleep(3000);
+                    continue;
                 }
 
                 if (!response.ok) {
@@ -75,7 +79,7 @@ async function callOpenRouter(userPrompt: string): Promise<string> {
 
                 if (!content || content.trim().length === 0) {
                     console.warn(`[OpenRouter] ⚠️ Пустой ответ от ${model}.`);
-                    break; // следующая модель
+                    break;
                 }
 
                 console.log(`[OpenRouter] ✅ Ответ от ${model} (${content.length} символов)`);
@@ -83,16 +87,16 @@ async function callOpenRouter(userPrompt: string): Promise<string> {
 
             } catch (error: any) {
                 if (error.name === 'AbortError') {
-                    console.warn(`[OpenRouter] ⏰ Таймаут ${model}.`);
+                    console.warn(`[OpenRouter] ⏰ Таймаут ${model} (45с).`);
                 } else {
                     console.error(`[OpenRouter] ❌ ${model}:`, error.message);
                 }
-                break; // следующая модель
+                break;
             }
         }
     }
 
-    throw new Error("Все модели временно перегружены (429). Подождите 1-2 минуты и попробуйте снова.");
+    throw new Error("Все модели временно перегружены. Подождите 1-2 минуты и попробуйте снова.");
 }
 
 // Извлекает JSON из ответа модели
@@ -112,6 +116,8 @@ function extractJSON(text: string): string {
 }
 
 // ===================== ГЕНЕРАЦИЯ МЕНЮ =====================
+
+const SYSTEM_PROMPT = `Ты — JSON-генератор меню. Отвечай СТРОГО ТОЛЬКО валидным JSON. Без текста до или после JSON. Без markdown-обёрток. Без объяснений. Только JSON.`;
 
 export async function generateChefPlan(
     inventory: Ingredient[],
@@ -139,50 +145,47 @@ export async function generateChefPlan(
         `- ${f.name}: ${f.gender}, ${f.age} лет, ${f.height}см, ${f.weight}кг. Активность: ${f.activityLevel}. Цель: ${f.goal}. Предпочтения: ${f.preferences}.`
     ).join("\n");
 
-    const prompt = `Ты — "Шеф Холодильник", шеф-повар и нутрициолог.
-
-Продукты: ${inventoryList}
+    const prompt = `Продукты: ${inventoryList}
 Семья (${activeFamily.length} чел.):
 ${familyProfiles}
 
-Готовить ТОЛЬКО из холодильника: ${onlyFridge ? 'ДА' : 'НЕТ'}.
+Только из холодильника: ${onlyFridge ? 'ДА' : 'НЕТ'}.
 
 Создай меню:
-- Завтрак: 3 блюда
-- Суп: 2 блюда
-- Основное (Обед/Ужин): 3 блюда
-- Десерт: 2 блюда
-- Хиты: 2 блюда
+- Завтрак: 2 блюда
+- Суп: 1 блюдо
+- Основное: 2 блюда
+- Десерт: 1 блюдо
 
-Для каждого: подробные пошаговые инструкции, количества на семью "Название (Количество)", КБЖУ на порцию, процент от дневной нормы каждого члена семьи.
-Список покупок: поле reason = точное название рецепта.
-ВСЁ на русском языке.
+Для каждого: краткие пошаговые инструкции, ингредиенты с количеством, КБЖУ, процент от нормы каждого члена семьи.
+Список покупок: reason = название рецепта.
+ВСЁ на русском.
 
-ОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON (без текста до/после, без \`\`\`json обёрток):
+JSON:
 {
-  "summary": "краткое описание меню",
+  "summary": "краткое описание",
   "recipes": [
     {
-      "name": "название блюда",
+      "name": "название",
       "description": "описание",
       "cookingTimeMinutes": 30,
       "difficulty": "легко|средне|сложно",
-      "ingredientsToUse": ["Название (Количество)"],
-      "missingIngredients": ["Название (Количество)"],
-      "healthBenefits": "польза для здоровья",
+      "ingredientsToUse": ["Название (Кол-во)"],
+      "missingIngredients": ["Название (Кол-во)"],
+      "healthBenefits": "польза",
       "weightPerServing": "250г",
       "totalWeightForFamily": "1кг",
       "caloriesPerServing": "350 ккал",
       "protein": "25г",
       "fats": "15г",
       "carbs": "30г",
-      "instructions": ["шаг 1...", "шаг 2..."],
+      "instructions": ["шаг 1", "шаг 2"],
       "mealType": ["Завтрак"],
       "familySuitability": [
         {
           "memberName": "Имя",
           "percentage": 85,
-          "reason": "причина оценки",
+          "reason": "причина",
           "nutritionStats": {
             "caloriesPercent": 14,
             "proteinPercent": 20,
@@ -194,12 +197,12 @@ ${familyProfiles}
     }
   ],
   "shoppingList": [
-    { "name": "продукт", "quantity": "количество", "reason": "Точное Название Рецепта" }
+    { "name": "продукт", "quantity": "кол-во", "reason": "Название Рецепта" }
   ]
 }`;
 
     try {
-        const rawResponse = await callOpenRouter(prompt);
+        const rawResponse = await callOpenRouter(SYSTEM_PROMPT, prompt);
         const jsonStr = extractJSON(rawResponse);
         const plan = JSON.parse(jsonStr) as ChefPlan;
         console.log(`[OpenRouter] ✅ Меню: ${plan.recipes?.length || 0} рецептов`);
@@ -212,60 +215,97 @@ ${familyProfiles}
 
 // ===================== РАСПОЗНАВАНИЕ ПРОДУКТОВ =====================
 
+const VISION_MODELS = [
+    "google/gemini-2.0-flash-lite-preview-02-05:free",
+    "google/gemini-2.0-pro-exp-02-05:free",
+    "meta-llama/llama-3.2-11b-vision-instruct:free",
+    "google/gemini-flash-1.5-8b",
+];
+
 export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
     if (!base64Image) throw new Error("Изображение не предоставлено");
 
-    try {
-        const apiKey = process.env.OPENROUTER_API_KEY;
-        if (!apiKey) throw new Error("OPENROUTER_API_KEY не задан");
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY не задан");
 
-        const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
 
-        const response = await fetch(OPENROUTER_API_URL, {
-            method: "POST",
-            headers: {
-                "Authorization": `Bearer ${apiKey}`,
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:3000",
-                "X-Title": "Schef Fridge",
-            },
-            body: JSON.stringify({
-                model: "google/gemma-3-27b-it:free",
-                messages: [
-                    {
-                        role: "user",
-                        content: [
-                            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Data}` } },
-                            {
-                                type: "text", text: `Определи все продукты питания на изображении.
-ОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом:
-[{"name": "название на русском", "category": "produce|dairy|meat|pantry|frozen|other"}]` }
-                        ]
-                    }
-                ],
-                temperature: 0.3,
-                max_tokens: 2000,
-            }),
-        });
+    for (let modelIdx = 0; modelIdx < VISION_MODELS.length; modelIdx++) {
+        const model = VISION_MODELS[modelIdx];
+        console.log(`[Vision] 👁️ Пробуем ${model}...`);
 
-        if (!response.ok) {
-            const err = await response.text();
-            throw new Error(`OpenRouter vision: ${response.status} - ${err.substring(0, 200)}`);
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 30000); // 30 сек на фото
+
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": SITE_URL,
+                    "X-Title": "Schef Fridge",
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Data}` } },
+                                {
+                                    type: "text",
+                                    text: `Посмотри на фото холодильника или продуктов. Перечисли ВСЕ продукты, которые видишь.
+ОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом объектов (без Markdown, без 'json'):
+[{"name": "Название (RU)", "category": "produce|dairy|meat|pantry|frozen|other"}]`
+                                }
+                            ]
+                        }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 1000,
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeout);
+
+            if (response.status === 429) {
+                console.warn(`[Vision] ⏳ 429 от ${model}.`);
+                continue;
+            }
+
+            if (!response.ok) {
+                const err = await response.text();
+                console.error(`[Vision] ❌ Ошибка ${model}: ${err.substring(0, 100)}`);
+                continue;
+            }
+
+            const data = await response.json() as any;
+            const content = data?.choices?.[0]?.message?.content;
+
+            if (!content) {
+                console.warn(`[Vision] ⚠️ Пустой ответ от ${model}`);
+                continue;
+            }
+
+            console.log(`[Vision] ✅ Успех (${model})`);
+
+            const jsonStr = extractJSON(content);
+            const rawItems = JSON.parse(jsonStr);
+
+            if (!Array.isArray(rawItems)) throw new Error("Ответ не является массивом");
+
+            return rawItems.map((item: any) => ({
+                id: Date.now().toString() + Math.random().toString().slice(2, 6),
+                name: item.name,
+                category: item.category || 'other'
+            }));
+
+        } catch (error: any) {
+            console.error(`[Vision] 💥 Ошибка ${model}:`, error.message);
         }
-
-        const data = await response.json() as any;
-        const content = data?.choices?.[0]?.message?.content;
-        if (!content) throw new Error("Пустой ответ");
-
-        const jsonStr = extractJSON(content);
-        const rawItems = JSON.parse(jsonStr);
-        return rawItems.map((item: any) => ({
-            id: Date.now().toString() + Math.random().toString().slice(2, 6),
-            name: item.name,
-            category: item.category
-        }));
-    } catch (error: any) {
-        console.error("Ошибка Vision:", error.message);
-        throw new Error("Не удалось распознать продукты: " + error.message);
     }
+
+    throw new Error("Не удалось распознать продукты. Все Vision-модели недоступны или не поняли фото.");
 }

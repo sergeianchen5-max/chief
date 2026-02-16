@@ -16,9 +16,25 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
     const [onlyFridge, setOnlyFridge] = useState(false);
     const [plan, setPlan] = useState<ChefPlan | null>(null);
     const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+    const [errorMessage, setErrorMessage] = useState<string>('');
+    const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [showShoppingList, setShowShoppingList] = useState(false);
-    const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null); // Recipe ID or Index
+    const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
     const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
+
+    // Таймер ожидания генерации
+    useEffect(() => {
+        let interval: NodeJS.Timeout | null = null;
+        if (generationState === 'generating') {
+            setElapsedSeconds(0);
+            interval = setInterval(() => {
+                setElapsedSeconds(prev => prev + 1);
+            }, 1000);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [generationState]);
 
     const handleGenerate = async () => {
         if (inventory.length === 0) {
@@ -31,14 +47,16 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
 
         setGenerationState('generating');
         setPlan(null);
-        setShowShoppingList(false); // Reset view
+        setErrorMessage('');
+        setShowShoppingList(false);
 
         try {
             const result = await generateChefPlan(inventory, family, onlyFridge);
             setPlan(result);
             setGenerationState('success');
-        } catch (error) {
+        } catch (error: any) {
             console.error("Generation failed:", error);
+            setErrorMessage(error?.message || 'Неизвестная ошибка');
             setGenerationState('error');
         }
     };
@@ -89,16 +107,17 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                     <ChefHat size={64} className="text-orange-500 animate-bounce relative z-10" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-800">Шеф думает...</h2>
+                <div className="text-3xl font-mono font-bold text-orange-500">{elapsedSeconds} сек</div>
                 <div className="max-w-md space-y-2 text-gray-500 text-sm">
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-green-500" /> Анализирую {inventory.length} продуктов</p>
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-blue-500" /> Учитываю цели {family.length} членов семьи</p>
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-purple-500" /> Подбираю рецепты...</p>
                 </div>
 
-                {/* Progress Bar Mockup */}
                 <div className="w-full max-w-xs bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                    <div className="bg-gradient-to-r from-orange-400 to-red-500 h-2.5 rounded-full w-2/3 animate-[shimmer_1s_infinite]"></div>
+                    <div className="bg-gradient-to-r from-orange-400 to-red-500 h-2.5 rounded-full animate-[shimmer_1s_infinite]" style={{ width: `${Math.min(90, elapsedSeconds * 2)}%`, transition: 'width 1s ease' }}></div>
                 </div>
+                {elapsedSeconds > 15 && <p className="text-xs text-gray-400">Почти готово, подождите ещё немного...</p>}
             </div>
         );
     }
@@ -110,7 +129,7 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                     <Soup size={48} className="text-red-500" />
                 </div>
                 <h2 className="text-xl font-bold text-red-600">Упс, кухня закрыта!</h2>
-                <p className="text-gray-600">Шеф не смог придумать меню. Возможно, сервер перегружен или закончились идеи.</p>
+                <p className="text-gray-600 max-w-md">{errorMessage || 'Шеф не смог придумать меню. Возможно, сервер перегружен.'}</p>
                 <button
                     onClick={handleGenerate}
                     className="bg-orange-500 text-white px-6 py-2 rounded-xl mt-4 hover:bg-orange-600 transition-colors"
