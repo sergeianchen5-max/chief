@@ -1,202 +1,168 @@
 'use server';
 
-import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory, MEAL_CATEGORIES } from "@/lib/types";
-import { generatePlanSchema } from "@/lib/schemas";
+import { GoogleGenAI, Type } from "@google/genai";
+import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory } from "@/lib/types";
 
-// Тип результата для безопасной передачи ошибок в production
-export type GenerateResult =
-    | { success: true; data: ChefPlan }
-    | { success: false; error: string };
-
-// ===================== КОНФИГУРАЦИЯ =====================
+// ===================== CONFIGURATION =====================
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
-// Fallback-модели OpenRouter (Только самые быстрые!)
+// Fallback models for OpenRouter (Free Tier priority)
 const OPENROUTER_MODELS = [
-    "meta-llama/llama-3.3-70b-instruct:free",           // Llama 3.3 (быстрая)
-    "google/gemma-3-27b-it:free",                       // Gemma 3 (быстрая)
+    "google/gemini-2.0-flash-exp:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "google/gemma-3-27b-it:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
+    "mistralai/mistral-small-24b-instruct-2501:free",
 ];
 
 const SITE_URL = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
     : "https://schef-xi.vercel.app";
 
-function sleep(ms: number) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+// Helper for type safety in responses
+export type GenerateResult =
+    | { success: true; data: ChefPlan }
+    | { success: false; error: string };
 
-// ===================== GEMINI API (ОСНОВНОЙ) - REST =====================
+// ===================== SCHEMAS =====================
 
-async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new Error("GEMINI_API_KEY не задан");
-    }
-
-    console.log(`[Gemini] 🚀 Запрос к Gemini 1.5 Flash (REST)...`);
-
-    try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000); // 15 секунд таймаут
-
-        const url = `${GEMINI_API_URL_BASE}/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-        const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-                systemInstruction: { parts: [{ text: systemPrompt }] },
-                generationConfig: {
-                    temperature: 0.5,
-                    maxOutputTokens: 4000
-                }
-            }),
-            signal: controller.signal
-        });
-
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Gemini Error ${response.status}: ${errText.substring(0, 200)}`);
-        }
-
-        const data = await response.json();
-        const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-        if (!content || content.trim().length === 0) {
-            throw new Error("Gemini вернул пустой ответ");
-        }
-
-        console.log(`[Gemini] ✅ Ответ получен (${content.length} символов)`);
-        return content;
-
-    } catch (error: any) {
-        if (error.name === 'AbortError') {
-            console.warn(`[Gemini] ⏰ Таймаут (15с)`);
-            throw new Error("Gemini timeout (15s)");
-        }
-        console.warn(`[Gemini] ⚠️ Ошибка: ${error.message}`);
-        throw error;
-    }
-}
-
-// ===================== OPENROUTER API (FALLBACK) =====================
-
-async function callOpenRouter(systemPrompt: string, userPrompt: string): Promise<string> {
-    const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) {
-        throw new Error("OPENROUTER_API_KEY не задан в .env.local");
-    }
-
-    for (let modelIdx = 0; modelIdx < OPENROUTER_MODELS.length; modelIdx++) {
-        const model = OPENROUTER_MODELS[modelIdx];
-
-        // Только 1 попытка на модель для скорости
-        console.log(`[OpenRouter] 🚀 ${model} (Fallback)...`);
-
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 20000); // 20 секунд макс
-
-            const response = await fetch(OPENROUTER_API_URL, {
-                method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${apiKey}`,
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": SITE_URL,
-                    "X-Title": "Schef Fridge",
+// Strict Schema for Gemini
+const planSchema = {
+    type: Type.OBJECT,
+    properties: {
+        summary: { type: Type.STRING },
+        recipes: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    cookingTimeMinutes: { type: Type.INTEGER },
+                    difficulty: { type: Type.STRING },
+                    ingredientsToUse: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
+                    missingIngredients: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
+                    healthBenefits: { type: Type.STRING },
+                    weightPerServing: { type: Type.STRING },
+                    totalWeightForFamily: { type: Type.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
+                    caloriesPerServing: { type: Type.STRING },
+                    protein: { type: Type.STRING },
+                    fats: { type: Type.STRING },
+                    carbs: { type: Type.STRING },
+                    instructions: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    mealType: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    familySuitability: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                memberName: { type: Type.STRING },
+                                percentage: { type: Type.INTEGER, description: "Suitability score 0-100" },
+                                reason: { type: Type.STRING },
+                                nutritionStats: {
+                                    type: Type.OBJECT,
+                                    description: "Percentage of Daily Value (DV) for this specific person provided by ONE serving of this recipe.",
+                                    properties: {
+                                        caloriesPercent: { type: Type.INTEGER, description: "% of daily Calorie needs" },
+                                        proteinPercent: { type: Type.INTEGER, description: "% of daily Protein needs" },
+                                        fatPercent: { type: Type.INTEGER, description: "% of daily Fat needs" },
+                                        carbPercent: { type: Type.INTEGER, description: "% of daily Carb needs" }
+                                    },
+                                    required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
+                                }
+                            },
+                            required: ["memberName", "percentage", "reason", "nutritionStats"]
+                        }
+                    }
                 },
-                body: JSON.stringify({
-                    model,
-                    messages: [
-                        { role: "system", content: systemPrompt },
-                        { role: "user", content: userPrompt },
-                    ],
-                    temperature: 0.5,
-                    max_tokens: 4000,
-                }),
-                signal: controller.signal,
-            });
-
-            clearTimeout(timeout);
-
-            if (response.status === 429) {
-                console.warn(`[OpenRouter] ⏳ 429 от ${model}.`);
-                continue; // Следующая модель
+                required: ["name", "description", "cookingTimeMinutes", "difficulty", "ingredientsToUse", "missingIngredients", "healthBenefits", "weightPerServing", "totalWeightForFamily", "caloriesPerServing", "protein", "fats", "carbs", "instructions", "mealType", "familySuitability"]
             }
-
-            if (!response.ok) {
-                const errorBody = await response.text();
-                continue;
+        },
+        shoppingList: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                properties: {
+                    name: { type: Type.STRING },
+                    quantity: { type: Type.STRING },
+                    reason: { type: Type.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
+                },
+                required: ["name", "quantity", "reason"]
             }
-
-            const data = await response.json() as any;
-            const content = data?.choices?.[0]?.message?.content;
-
-            if (!content || content.trim().length === 0) {
-                console.warn(`[OpenRouter] ⚠️ Пустой ответ от ${model}.`);
-                continue;
-            }
-
-            console.log(`[OpenRouter] ✅ Ответ от ${model} (${content.length} символов)`);
-            return content;
-
-        } catch (error: any) {
-            console.error(`[OpenRouter] ❌ ${model}:`, error.message);
-            continue;
         }
-    }
-
-    throw new Error("Все модели недоступны. Попробуйте через 1-2 минуты.");
-}
-
-// ===================== УНИВЕРСАЛЬНЫЙ ВЫЗОВ =====================
-
-async function callAI(systemPrompt: string, userPrompt: string): Promise<string> {
-    // 1. Gemini — основной
-    try {
-        return await callGemini(systemPrompt, userPrompt);
-    } catch (error: any) {
-        console.warn(`[AI] ⚠️ Gemini недоступен: ${error.message}. Переключаемся на OpenRouter...`);
-    }
-
-    // 2. OpenRouter — fallback
-    return await callOpenRouter(systemPrompt, userPrompt);
-}
-
-// Извлекает JSON из ответа модели
-function extractJSON(text: string): string {
-    let cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-
-    const jsonBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (jsonBlockMatch) return jsonBlockMatch[1].trim();
-
-    const jsonObjMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonObjMatch) return jsonObjMatch[0].trim();
-
-    const jsonArrMatch = cleaned.match(/\[[\s\S]*\]/);
-    if (jsonArrMatch) return jsonArrMatch[0].trim();
-
-    return cleaned;
-}
-
-// ===================== ГЕНЕРАЦИЯ МЕНЮ =====================
-
-const SYSTEM_PROMPT = `Ты — JSON-генератор меню. Отвечай СТРОГО ТОЛЬКО валидным JSON. Без текста до или после JSON. Без markdown-обёрток. Без объяснений. Только JSON.`;
-
-// Маппинг категорий → описание для промпта
-const CATEGORY_PROMPT_MAP: Record<MealCategory, string> = {
-    breakfast: 'Завтрак: 1-2 блюда (каши, омлеты, сырники, бутерброды)',
-    salad: 'Салаты и закуски: 1-2 блюда (свежие, тёплые, лёгкие)',
-    soup: 'Первое блюдо (суп): 1 блюдо (борщ, щи, крем-суп, бульон)',
-    main: 'Второе блюдо: 1-2 блюда (мясо, рыба, птица + гарнир)',
-    dessert: 'Десерт/выпечка: 1 блюдо (пирожки, торт, блины с начинкой)',
-    drink: 'Напиток: 1 (компот, смузи, морс, кисель)',
+    },
+    required: ["summary", "recipes", "shoppingList"]
 };
+
+// Simplified JSON Schema for OpenRouter (compatible with OpenAI format)
+const openRouterPlanSchema = {
+    type: "object",
+    properties: {
+        summary: { type: "string" },
+        recipes: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    cookingTimeMinutes: { type: "integer" },
+                    difficulty: { type: "string" },
+                    ingredientsToUse: { type: "array", items: { type: "string" } },
+                    missingIngredients: { type: "array", items: { type: "string" } },
+                    healthBenefits: { type: "string" },
+                    weightPerServing: { type: "string" },
+                    totalWeightForFamily: { type: "string" },
+                    caloriesPerServing: { type: "string" },
+                    protein: { type: "string" },
+                    fats: { type: "string" },
+                    carbs: { type: "string" },
+                    instructions: { type: "array", items: { type: "string" } },
+                    mealType: { type: "array", items: { type: "string" } },
+                    familySuitability: {
+                        type: "array",
+                        items: {
+                            type: "object",
+                            properties: {
+                                memberName: { type: "string" },
+                                percentage: { type: "integer" },
+                                reason: { type: "string" },
+                                nutritionStats: {
+                                    type: "object",
+                                    properties: {
+                                        caloriesPercent: { type: "integer" },
+                                        proteinPercent: { type: "integer" },
+                                        fatPercent: { type: "integer" },
+                                        carbPercent: { type: "integer" }
+                                    },
+                                    required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
+                                }
+                            },
+                            required: ["memberName", "percentage", "reason", "nutritionStats"]
+                        }
+                    }
+                },
+                required: ["name", "description", "cookingTimeMinutes", "difficulty", "ingredientsToUse", "missingIngredients", "healthBenefits", "weightPerServing", "totalWeightForFamily", "caloriesPerServing", "protein", "fats", "carbs", "instructions", "mealType", "familySuitability"]
+            }
+        },
+        shoppingList: {
+            type: "array",
+            items: {
+                type: "object",
+                properties: {
+                    name: { type: "string" },
+                    quantity: { type: "string" },
+                    reason: { type: "string" }
+                },
+                required: ["name", "quantity", "reason"]
+            }
+        }
+    },
+    required: ["summary", "recipes", "shoppingList"]
+};
+
+// ===================== GENERATION LOGIC =====================
 
 export async function generateChefPlan(
     inventory: Ingredient[],
@@ -205,6 +171,7 @@ export async function generateChefPlan(
     categories: MealCategory[] = ['breakfast', 'soup', 'main', 'dessert']
 ): Promise<GenerateResult> {
 
+    // 1. Prepare Data
     let activeFamily = family;
     if (!activeFamily || activeFamily.length === 0) {
         activeFamily = [{
@@ -214,168 +181,106 @@ export async function generateChefPlan(
         }];
     }
 
-    const validation = generatePlanSchema.safeParse({ inventory, family: activeFamily, onlyFridge, categories });
-    if (!validation.success) {
-        return { success: false, error: "Ошибка валидации: " + validation.error.message };
-    }
-
-    const inventoryList = (inventory.length > 0 ? inventory.map(i => i.name).join(", ") : "Пустой холодильник") + ", Вода, Соль, Перец";
+    const inventoryList = (inventory.length > 0 ? inventory.map(i => i.name).join(", ") : "Empty Fridge") + ", Вода, Соль, Перец";
 
     const familyProfiles = activeFamily.map(f =>
-        `- ${f.name}: ${f.gender}, ${f.age} лет, ${f.height}см, ${f.weight}кг. Активность: ${f.activityLevel}. Цель: ${f.goal}. Предпочтения: ${f.preferences}.`
+        `- ${f.name}: ${f.gender}, ${f.age}y.o., ${f.height}cm, ${f.weight}kg. Activity: ${f.activityLevel}. Goal: ${f.goal}. Prefs: ${f.preferences}.`
     ).join("\n");
 
-    // Динамический список блюд по выбранным категориям
-    const menuItems = categories
-        .map(cat => `- ${CATEGORY_PROMPT_MAP[cat]}`)
-        .join("\n");
+    const categoryDescriptions: Record<MealCategory, string> = {
+        breakfast: "- Breakfast (Завтрак): 2+ options.",
+        soup: "- Soup (Суп): 1+ options.",
+        main: "- Main Course (Обед/Ужин): 2+ options.",
+        dessert: "- Dessert (Десерт): 1+ options.",
+        salad: "- Salads (Салаты): 1+ options.",
+        drink: "- Drinks (Напитки): 1+ options."
+    };
 
-    const prompt = `Продукты: ${inventoryList}
-Семья (${activeFamily.length} чел.):
-${familyProfiles}
+    const requestedCategories = categories.map(c => categoryDescriptions[c] || "").join("\n         ");
 
-Только из холодильника: ${onlyFridge ? 'ДА' : 'НЕТ'}.
+    const categoriesSection = `
+         ${requestedCategories}
+         - Popular/Hits (Популярное): 2+ options. These MUST be universally loved "Hit" recipes.
+    `;
 
-Создай меню:
-${menuItems}
-
-Для каждого: краткие пошаговые инструкции, ингредиенты с количеством, КБЖУ, процент от нормы каждого члена семьи.
-Список покупок: reason = название рецепта.
-ВСЁ на русском.
-
-JSON:
-{
-  "summary": "краткое описание",
-  "recipes": [
-    {
-      "name": "название",
-      "description": "описание",
-      "cookingTimeMinutes": 30,
-      "difficulty": "легко|средне|сложно",
-      "ingredientsToUse": ["Название (Кол-во)"],
-      "missingIngredients": ["Название (Кол-во)"],
-      "healthBenefits": "польза",
-      "weightPerServing": "250г",
-      "totalWeightForFamily": "1кг",
-      "caloriesPerServing": "350 ккал",
-      "protein": "25г",
-      "fats": "15г",
-      "carbs": "30г",
-      "instructions": ["шаг 1", "шаг 2"],
-      "mealType": ["Завтрак"],
-      "familySuitability": [
-        {
-          "memberName": "Имя",
-          "percentage": 85,
-          "reason": "причина",
-          "nutritionStats": {
-            "caloriesPercent": 14,
-            "proteinPercent": 20,
-            "fatPercent": 18,
-            "carbPercent": 10
-          }
+    const prompt = `
+      Act as "Chef Fridge", a passionate Michelin-star chef and nutritionist.
+      Current Products (Fridge + Basic Pantry): ${inventoryList}
+      Family Profiles (Total members: ${activeFamily.length}):
+      ${familyProfiles} 
+      
+      CONSTRAINT: "Cook from Fridge Only" mode is set to: ${onlyFridge ? 'TRUE' : 'FALSE'}.
+      
+      Task:
+      1. Analyze Family Goals & Body Stats (Height/Weight/Gender) to estimate daily calorie needs (TDEE).
+      2. Create a MENU. 
+         ${onlyFridge
+            ? 'PRIORITY 1: Suggest recipes that use 100% of available ingredients. If impossible, missing ingredients must be minimal. PRIORITIZE EXISTING STOCK over variety.'
+            : 'Suggest balanced recipes. It is okay to buy new ingredients.'
         }
-      ]
-    }
-  ],
-  "shoppingList": [
-    { "name": "продукт", "quantity": "кол-во", "reason": "Название Рецепта" }
-  ]
-}`;
+      3. SELECT RECIPES: Choose dishes that are popularly known to be delicious and have high ratings in culinary culture.
+      4. CATEGORIES:
+         ${categoriesSection}
+      
+      5. INSTRUCTIONS: Provide **EXTREMELY DETAILED** cooking instructions. 
+      
+      6. QUANTITIES (CRITICAL):
+         - In 'ingredientsToUse' and 'missingIngredients', you MUST specify the EXACT QUANTITY needed for the WHOLE FAMILY.
+         - Format: "Product Name (Quantity)". 
+         - Example: "Chicken Breast (600g)", "Carrots (2 medium)", "Milk (500ml)".
+         - Do NOT just list the name. 
+      
+      7. FAMILY SUITABILITY & NUTRITION (CRITICAL):
+         - For EACH recipe, populate 'familySuitability'.
+         - 'nutritionStats': Calculate what percentage of the person's Daily Norm (KBJU) is covered by ONE serving of this dish.
+         - Example: If Dad needs 2500kcal and the dish is 500kcal, caloriesPercent = 20.
+      
+      8. SHOPPING LIST:
+         - 'reason' field MUST be the EXACT name of the recipe string. If the recipe name is "Borscht with Cream", the reason must be "Borscht with Cream".
+      
+      9. LANGUAGE: Russian.
+    `;
 
+    // 2. Try Gemini (Primary)
     try {
-        const rawResponse = await callAI(SYSTEM_PROMPT, prompt);
-        const jsonStr = extractJSON(rawResponse);
-        const plan = JSON.parse(jsonStr) as ChefPlan;
-        console.log(`[AI] ✅ Меню: ${plan.recipes?.length || 0} рецептов`);
-        return { success: true, data: plan };
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (!apiKey) throw new Error("GEMINI_API_KEY not found");
+
+        const client = new GoogleGenAI({ apiKey });
+
+        const response = await client.models.generateContent({
+            model: "gemini-1.5-flash-001", // Use specific version to avoid 404
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: planSchema,
+            },
+        });
+
+        const responseText = response.text;
+        console.log("🔍 [AI] Raw response length:", responseText?.length);
+
+        if (responseText) {
+            // Clean up Markdown if present
+            const cleanText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+            const plan = JSON.parse(cleanText) as ChefPlan;
+            return { success: true, data: plan };
+        }
+        throw new Error("Empty response from Gemini");
+
     } catch (error: any) {
-        console.error("Ошибка генерации меню:", error.message);
-        return { success: false, error: error.message || 'Неизвестная ошибка' };
+        console.warn(`[AI] ⚠️ Gemini Error: ${error.message}. Switching to OpenRouter Fallback...`);
+        return await callOpenRouterFallback(prompt);
     }
 }
 
-// ===================== РАСПОЗНАВАНИЕ ПРОДУКТОВ =====================
-
-const VISION_MODELS = [
-    "google/gemma-3-27b-it:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-];
-
-export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
-    if (!base64Image) throw new Error("Изображение не предоставлено");
-
-    // 1. Попробовать Gemini Vision
-    try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (apiKey) {
-            console.log(`[Vision] 🚀 Gemini Vision (REST)...`);
-
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 15000); // 15s
-
-            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
-            const url = `${GEMINI_API_URL_BASE}/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{
-                        role: "user",
-                        parts: [
-                            { inlineData: { mimeType: "image/jpeg", data: base64Data } },
-                            { text: `Посмотри на фото холодильника или продуктов. Перечисли ВСЕ продукты.\nОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом:\n[{"name": "Название (RU)", "category": "produce|dairy|meat|pantry|frozen|other"}]` }
-                        ]
-                    }],
-                    generationConfig: {
-                        temperature: 0.1,
-                        maxOutputTokens: 1000
-                    }
-                }),
-                signal: controller.signal
-            });
-
-            clearTimeout(timeout);
-
-            if (response.ok) {
-                const data = await response.json();
-                const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-
-                if (content) {
-                    const jsonStr = extractJSON(content);
-                    const rawItems = JSON.parse(jsonStr);
-                    if (Array.isArray(rawItems)) {
-                        console.log(`[Vision] ✅ Gemini распознал ${rawItems.length} продуктов`);
-                        return rawItems.map((item: any) => ({
-                            id: Date.now().toString() + Math.random().toString().slice(2, 6),
-                            name: item.name,
-                            category: item.category || 'other'
-                        }));
-                    }
-                }
-            } else {
-                console.warn(`[Vision] ⚠️ Gemini Error: ${response.status}`);
-            }
-        }
-    } catch (error: any) {
-        console.warn(`[Vision] ⚠️ Gemini Vision ошибка: ${error.message}. Fallback на OpenRouter...`);
-    }
-
-    // 2. OpenRouter fallback
+async function callOpenRouterFallback(prompt: string): Promise<GenerateResult> {
     const apiKey = process.env.OPENROUTER_API_KEY;
-    if (!apiKey) throw new Error("OPENROUTER_API_KEY не задан");
+    if (!apiKey) return { success: false, error: "OpenRouter Key Missing" };
 
-    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
-
-    for (let modelIdx = 0; modelIdx < VISION_MODELS.length; modelIdx++) {
-        const model = VISION_MODELS[modelIdx];
-        console.log(`[Vision] 👁️ Пробуем ${model}...`);
-
+    for (const model of OPENROUTER_MODELS) {
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 20000); // 20 сек
-
+            console.log(`[OpenRouter] Trying ${model}...`);
             const response = await fetch(OPENROUTER_API_URL, {
                 method: "POST",
                 headers: {
@@ -386,64 +291,92 @@ export async function recognizeIngredients(base64Image: string): Promise<Ingredi
                 },
                 body: JSON.stringify({
                     model,
-                    messages: [
-                        {
-                            role: "user",
-                            content: [
-                                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Data}` } },
-                                {
-                                    type: "text",
-                                    text: `Посмотри на фото холодильника или продуктов. Перечисли ВСЕ продукты, которые видишь.
-ОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом объектов (без Markdown, без 'json'):
-[{"name": "Название (RU)", "category": "produce|dairy|meat|pantry|frozen|other"}]`
-                                }
-                            ]
-                        }
-                    ],
-                    temperature: 0.1,
-                    max_tokens: 1000,
-                }),
-                signal: controller.signal,
+                    messages: [{ role: "user", content: prompt }],
+                    // Use 'json_object' mode instead of 'json_schema' for better compatibility with free models like Llama 3
+                    response_format: { type: "json_object" },
+                })
             });
 
-            clearTimeout(timeout);
-
-            if (response.status === 429) {
-                console.warn(`[Vision] ⏳ 429 от ${model}.`);
-                continue;
-            }
-
             if (!response.ok) {
-                const err = await response.text();
-                // console.error(`[Vision] ❌ Ошибка ${model}: ${err.substring(0, 100)}`);
+                const text = await response.text();
+                // console.warn(`[OpenRouter] ${model} failed: ${text}`); 
                 continue;
             }
 
-            const data = await response.json() as any;
-            const content = data?.choices?.[0]?.message?.content;
+            const data = await response.json();
+            const content = data.choices?.[0]?.message?.content;
+            if (!content) continue;
 
-            if (!content) {
-                console.warn(`[Vision] ⚠️ Пустой ответ от ${model}`);
-                continue;
+            // Try to parse JSON from content (it might be wrapped in ```json ... ```)
+            const cleanContent = content.replace(/```json/g, '').replace(/```/g, '').trim();
+
+            const plan = JSON.parse(cleanContent) as ChefPlan;
+
+            // Basic validation
+            if (!plan.recipes || !Array.isArray(plan.recipes)) {
+                throw new Error("Invalid structure from OpenRouter");
             }
 
-            console.log(`[Vision] ✅ Успех (${model})`);
-
-            const jsonStr = extractJSON(content);
-            const rawItems = JSON.parse(jsonStr);
-
-            if (!Array.isArray(rawItems)) throw new Error("Ответ не является массивом");
-
-            return rawItems.map((item: any) => ({
-                id: Date.now().toString() + Math.random().toString().slice(2, 6),
-                name: item.name,
-                category: item.category || 'other'
-            }));
-
-        } catch (error: any) {
-            console.error(`[Vision] 💥 Ошибка ${model}:`, error.message);
+            return { success: true, data: plan };
+        } catch (e: any) {
+            console.warn(`[OpenRouter] Failed ${model}`, e.message);
         }
     }
 
-    throw new Error("Не удалось распознать продукты. Все Vision-модели недоступны или не поняли фото.");
+    return { success: false, error: "Все AI сервисы недоступны. Попробуйте позже." };
+}
+
+// ===================== VISION LOGIC =====================
+
+const ingredientListSchema = {
+    type: Type.ARRAY,
+    items: {
+        type: Type.OBJECT,
+        properties: {
+            name: { type: Type.STRING },
+            category: { type: Type.STRING, enum: ['produce', 'dairy', 'meat', 'pantry', 'frozen', 'other'] }
+        },
+        required: ["name", "category"]
+    }
+};
+
+export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
+    if (!base64Image) return [];
+
+    const promptText = "Analyze this image. Identify all visible food ingredients. Return list with categories. Language: Russian.";
+
+    // 1. Gemini Vision
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (apiKey) {
+            const client = new GoogleGenAI({ apiKey });
+            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+
+            const response = await client.models.generateContent({
+                model: "gemini-1.5-flash-001",
+                contents: [
+                    { inlineData: { mimeType: "image/jpeg", data: base64Data } },
+                    { text: promptText }
+                ],
+                config: {
+                    responseMimeType: "application/json",
+                    responseSchema: ingredientListSchema,
+                }
+            });
+
+            const text = response.text;
+            if (text) {
+                const rawItems = JSON.parse(text);
+                return rawItems.map((item: any) => ({
+                    id: Date.now().toString() + Math.random().toString().slice(2, 6),
+                    name: item.name,
+                    category: item.category
+                }));
+            }
+        }
+    } catch (e) {
+        console.warn("Gemini Vision failed", e);
+    }
+
+    return [];
 }
