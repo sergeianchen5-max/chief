@@ -1,50 +1,49 @@
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { ChefPlan, FamilyMember, Ingredient, MealCategory } from "@/lib/types";
 import { generateChefPlan as generateChefPlanServerAction } from "@/app/actions/ai";
 
 // === SCHEMAS FOR CLIENT-SIDE VALIDATION ===
-// Дублируем схемы, используем Type вместо SchemaType для @google/genai
 
 const planSchema = {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
-        summary: { type: Type.STRING },
+        summary: { type: SchemaType.STRING },
         recipes: {
-            type: Type.ARRAY,
+            type: SchemaType.ARRAY,
             items: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    cookingTimeMinutes: { type: Type.INTEGER },
-                    difficulty: { type: Type.STRING },
-                    ingredientsToUse: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
-                    missingIngredients: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
-                    healthBenefits: { type: Type.STRING },
-                    weightPerServing: { type: Type.STRING },
-                    totalWeightForFamily: { type: Type.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
-                    caloriesPerServing: { type: Type.STRING },
-                    protein: { type: Type.STRING },
-                    fats: { type: Type.STRING },
-                    carbs: { type: Type.STRING },
-                    instructions: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    mealType: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    name: { type: SchemaType.STRING },
+                    description: { type: SchemaType.STRING },
+                    cookingTimeMinutes: { type: SchemaType.INTEGER },
+                    difficulty: { type: SchemaType.STRING },
+                    ingredientsToUse: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
+                    missingIngredients: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
+                    healthBenefits: { type: SchemaType.STRING },
+                    weightPerServing: { type: SchemaType.STRING },
+                    totalWeightForFamily: { type: SchemaType.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
+                    caloriesPerServing: { type: SchemaType.STRING },
+                    protein: { type: SchemaType.STRING },
+                    fats: { type: SchemaType.STRING },
+                    carbs: { type: SchemaType.STRING },
+                    instructions: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    mealType: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
                     familySuitability: {
-                        type: Type.ARRAY,
+                        type: SchemaType.ARRAY,
                         items: {
-                            type: Type.OBJECT,
+                            type: SchemaType.OBJECT,
                             properties: {
-                                memberName: { type: Type.STRING },
-                                percentage: { type: Type.INTEGER, description: "Suitability score 0-100" },
-                                reason: { type: Type.STRING },
+                                memberName: { type: SchemaType.STRING },
+                                percentage: { type: SchemaType.INTEGER, description: "Suitability score 0-100" },
+                                reason: { type: SchemaType.STRING },
                                 nutritionStats: {
-                                    type: Type.OBJECT,
+                                    type: SchemaType.OBJECT,
                                     description: "Percentage of Daily Value (DV) for this specific person provided by ONE serving of this recipe.",
                                     properties: {
-                                        caloriesPercent: { type: Type.INTEGER, description: "% of daily Calorie needs" },
-                                        proteinPercent: { type: Type.INTEGER, description: "% of daily Protein needs" },
-                                        fatPercent: { type: Type.INTEGER, description: "% of daily Fat needs" },
-                                        carbPercent: { type: Type.INTEGER, description: "% of daily Carb needs" }
+                                        caloriesPercent: { type: SchemaType.INTEGER, description: "% of daily Calorie needs" },
+                                        proteinPercent: { type: SchemaType.INTEGER, description: "% of daily Protein needs" },
+                                        fatPercent: { type: SchemaType.INTEGER, description: "% of daily Fat needs" },
+                                        carbPercent: { type: SchemaType.INTEGER, description: "% of daily Carb needs" }
                                     },
                                     required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
                                 }
@@ -57,13 +56,13 @@ const planSchema = {
             }
         },
         shoppingList: {
-            type: Type.ARRAY,
+            type: SchemaType.ARRAY,
             items: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    quantity: { type: Type.STRING },
-                    reason: { type: Type.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
+                    name: { type: SchemaType.STRING },
+                    quantity: { type: SchemaType.STRING },
+                    reason: { type: SchemaType.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
                 },
                 required: ["name", "quantity", "reason"]
             }
@@ -117,7 +116,15 @@ export class GenerationService {
                 };
             }
 
-            const client = new GoogleGenAI({ apiKey });
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const model = genAI.getGenerativeModel({
+                model: "gemini-1.5-flash",
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    // @ts-ignore
+                    responseSchema: planSchema,
+                }
+            });
 
             // Prepare Prompt (Duplicate logic to ensure independence)
             const inventoryList = (inventory.length > 0 ? inventory.map(i => i.name).join(", ") : "Empty Fridge") + ", Вода, Соль, Перец";
@@ -163,22 +170,15 @@ export class GenerationService {
              - Calculate 'nutritionStats' (% Daily Value) for EACH person.
            
            6. SHOPPING LIST:
-             - 'reason' field MUST be the EXACT name of the recipe.
+             - 'reason' field MUST be the EXACT name of the recipe requiring this item.
            
            7. LANGUAGE: Russian.
         `;
 
-            const response = await client.models.generateContent({
-                model: "gemini-1.5-flash-001", // Use specific version to avoid 404
-                contents: prompt,
-                config: {
-                    responseMimeType: "application/json",
-                    responseSchema: planSchema,
-                }
-            });
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text();
 
-            if (response.text) {
-                const responseText = response.text;
+            if (responseText) {
                 const cleanText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
                 const plan = JSON.parse(cleanText) as ChefPlan;
                 console.log("✅ [GenerationService] Client-Side Success");

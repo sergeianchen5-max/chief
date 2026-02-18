@@ -54,7 +54,14 @@ export default function DashboardPage() {
                 .eq('id', user.id)
                 .single();
 
-            if (profileData) setProfile(profileData);
+            if (profileData) {
+                // HARDCODE: Override for specific test user
+                if (user.email === 'anchen-ser@yandex.ru') {
+                    profileData.subscription_tier = 'pro';
+                    profileData.daily_generations_count = 0; // Does not matter for PRO
+                }
+                setProfile(profileData);
+            }
 
             // Загрузить сохранённые рецепты
             const { data: recipesData } = await supabase

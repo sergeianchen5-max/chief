@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChefHat, ShoppingCart, Clock, TrendingUp, CheckCircle, Loader2, Send, Bookmark, Scale, Utensils, ChevronDown, ChevronUp, Sun, Moon, Coffee, Soup, CheckSquare, Square, User, Users, Copy, Star, Eye, EyeOff, Share2, Download, ExternalLink, Printer, Image as ImageIcon, PlusCircle, StickyNote, Mail, PackagePlus, Zap, Check } from 'lucide-react';
 import { ChefPlan, FamilyMember, Ingredient, Recipe, ShoppingItem, MealCategory, MEAL_CATEGORIES } from '@/lib/types';
-import { generateChefPlan } from '@/app/actions/ai';
+import { GenerationService } from '@/services/generationService';
 
 interface ChefPanelProps {
     inventory: Ingredient[];
@@ -58,17 +58,22 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
         setShowShoppingList(false);
 
         try {
-            const result = await generateChefPlan(inventory, family, onlyFridge, selectedCategories);
-            if (result.success) {
+            // Использование нового сервиса с фоллбеком
+            const result = await GenerationService.generateChefPlanSafe(inventory, family, onlyFridge, selectedCategories);
+
+            if (result.success && result.data) {
                 setPlan(result.data);
                 setGenerationState('success');
+                if (result.source === 'client') {
+                    console.info("⚠️ Used Client-Side Fallback for generation");
+                }
             } else {
-                setErrorMessage(result.error);
+                setErrorMessage(result.error || 'Неизвестная ошибка');
                 setGenerationState('error');
             }
         } catch (error: any) {
-            console.error("Generation failed:", error);
-            setErrorMessage('Ошибка соединения с сервером. Попробуйте ещё раз.');
+            console.error("Generation completely failed:", error);
+            setErrorMessage('Ошибка соединения. Проверьте интернет.');
             setGenerationState('error');
         }
     };

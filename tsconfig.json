@@ -40,6 +40,8 @@
     "node_modules",
     "_prototype",
     "dist",
-    ".next"
+    ".next",
+    "schef_old",
+    "copy-of-шеф-холодильник"
   ]
 }

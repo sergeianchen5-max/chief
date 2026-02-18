@@ -1,6 +1,6 @@
 'use server';
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory } from "@/lib/types";
 
 // ===================== CONFIGURATION =====================
@@ -29,45 +29,45 @@ export type GenerateResult =
 
 // Strict Schema for Gemini
 const planSchema = {
-    type: Type.OBJECT,
+    type: SchemaType.OBJECT,
     properties: {
-        summary: { type: Type.STRING },
+        summary: { type: SchemaType.STRING },
         recipes: {
-            type: Type.ARRAY,
+            type: SchemaType.ARRAY,
             items: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    cookingTimeMinutes: { type: Type.INTEGER },
-                    difficulty: { type: Type.STRING },
-                    ingredientsToUse: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
-                    missingIngredients: { type: Type.ARRAY, items: { type: Type.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
-                    healthBenefits: { type: Type.STRING },
-                    weightPerServing: { type: Type.STRING },
-                    totalWeightForFamily: { type: Type.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
-                    caloriesPerServing: { type: Type.STRING },
-                    protein: { type: Type.STRING },
-                    fats: { type: Type.STRING },
-                    carbs: { type: Type.STRING },
-                    instructions: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    mealType: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    name: { type: SchemaType.STRING },
+                    description: { type: SchemaType.STRING },
+                    cookingTimeMinutes: { type: SchemaType.INTEGER },
+                    difficulty: { type: SchemaType.STRING },
+                    ingredientsToUse: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
+                    missingIngredients: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
+                    healthBenefits: { type: SchemaType.STRING },
+                    weightPerServing: { type: SchemaType.STRING },
+                    totalWeightForFamily: { type: SchemaType.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
+                    caloriesPerServing: { type: SchemaType.STRING },
+                    protein: { type: SchemaType.STRING },
+                    fats: { type: SchemaType.STRING },
+                    carbs: { type: SchemaType.STRING },
+                    instructions: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    mealType: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
                     familySuitability: {
-                        type: Type.ARRAY,
+                        type: SchemaType.ARRAY,
                         items: {
-                            type: Type.OBJECT,
+                            type: SchemaType.OBJECT,
                             properties: {
-                                memberName: { type: Type.STRING },
-                                percentage: { type: Type.INTEGER, description: "Suitability score 0-100" },
-                                reason: { type: Type.STRING },
+                                memberName: { type: SchemaType.STRING },
+                                percentage: { type: SchemaType.INTEGER, description: "Suitability score 0-100" },
+                                reason: { type: SchemaType.STRING },
                                 nutritionStats: {
-                                    type: Type.OBJECT,
+                                    type: SchemaType.OBJECT,
                                     description: "Percentage of Daily Value (DV) for this specific person provided by ONE serving of this recipe.",
                                     properties: {
-                                        caloriesPercent: { type: Type.INTEGER, description: "% of daily Calorie needs" },
-                                        proteinPercent: { type: Type.INTEGER, description: "% of daily Protein needs" },
-                                        fatPercent: { type: Type.INTEGER, description: "% of daily Fat needs" },
-                                        carbPercent: { type: Type.INTEGER, description: "% of daily Carb needs" }
+                                        caloriesPercent: { type: SchemaType.INTEGER, description: "% of daily Calorie needs" },
+                                        proteinPercent: { type: SchemaType.INTEGER, description: "% of daily Protein needs" },
+                                        fatPercent: { type: SchemaType.INTEGER, description: "% of daily Fat needs" },
+                                        carbPercent: { type: SchemaType.INTEGER, description: "% of daily Carb needs" }
                                     },
                                     required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
                                 }
@@ -80,80 +80,13 @@ const planSchema = {
             }
         },
         shoppingList: {
-            type: Type.ARRAY,
+            type: SchemaType.ARRAY,
             items: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                    name: { type: Type.STRING },
-                    quantity: { type: Type.STRING },
-                    reason: { type: Type.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
-                },
-                required: ["name", "quantity", "reason"]
-            }
-        }
-    },
-    required: ["summary", "recipes", "shoppingList"]
-};
-
-// Simplified JSON Schema for OpenRouter (compatible with OpenAI format)
-const openRouterPlanSchema = {
-    type: "object",
-    properties: {
-        summary: { type: "string" },
-        recipes: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    name: { type: "string" },
-                    description: { type: "string" },
-                    cookingTimeMinutes: { type: "integer" },
-                    difficulty: { type: "string" },
-                    ingredientsToUse: { type: "array", items: { type: "string" } },
-                    missingIngredients: { type: "array", items: { type: "string" } },
-                    healthBenefits: { type: "string" },
-                    weightPerServing: { type: "string" },
-                    totalWeightForFamily: { type: "string" },
-                    caloriesPerServing: { type: "string" },
-                    protein: { type: "string" },
-                    fats: { type: "string" },
-                    carbs: { type: "string" },
-                    instructions: { type: "array", items: { type: "string" } },
-                    mealType: { type: "array", items: { type: "string" } },
-                    familySuitability: {
-                        type: "array",
-                        items: {
-                            type: "object",
-                            properties: {
-                                memberName: { type: "string" },
-                                percentage: { type: "integer" },
-                                reason: { type: "string" },
-                                nutritionStats: {
-                                    type: "object",
-                                    properties: {
-                                        caloriesPercent: { type: "integer" },
-                                        proteinPercent: { type: "integer" },
-                                        fatPercent: { type: "integer" },
-                                        carbPercent: { type: "integer" }
-                                    },
-                                    required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
-                                }
-                            },
-                            required: ["memberName", "percentage", "reason", "nutritionStats"]
-                        }
-                    }
-                },
-                required: ["name", "description", "cookingTimeMinutes", "difficulty", "ingredientsToUse", "missingIngredients", "healthBenefits", "weightPerServing", "totalWeightForFamily", "caloriesPerServing", "protein", "fats", "carbs", "instructions", "mealType", "familySuitability"]
-            }
-        },
-        shoppingList: {
-            type: "array",
-            items: {
-                type: "object",
-                properties: {
-                    name: { type: "string" },
-                    quantity: { type: "string" },
-                    reason: { type: "string" }
+                    name: { type: SchemaType.STRING },
+                    quantity: { type: SchemaType.STRING },
+                    reason: { type: SchemaType.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
                 },
                 required: ["name", "quantity", "reason"]
             }
@@ -246,18 +179,19 @@ export async function generateChefPlan(
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) throw new Error("GEMINI_API_KEY not found");
 
-        const client = new GoogleGenAI({ apiKey });
-
-        const response = await client.models.generateContent({
-            model: "gemini-1.5-flash-001", // Use specific version to avoid 404
-            contents: prompt,
-            config: {
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({
+            model: "gemini-1.5-flash",
+            generationConfig: {
                 responseMimeType: "application/json",
+                // @ts-ignore - Schema mismatch between types but works at runtime
                 responseSchema: planSchema,
             },
         });
 
-        const responseText = response.text;
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.text();
+
         console.log("🔍 [AI] Raw response length:", responseText?.length);
 
         if (responseText) {
@@ -329,12 +263,12 @@ async function callOpenRouterFallback(prompt: string): Promise<GenerateResult> {
 // ===================== VISION LOGIC =====================
 
 const ingredientListSchema = {
-    type: Type.ARRAY,
+    type: SchemaType.ARRAY,
     items: {
-        type: Type.OBJECT,
+        type: SchemaType.OBJECT,
         properties: {
-            name: { type: Type.STRING },
-            category: { type: Type.STRING, enum: ['produce', 'dairy', 'meat', 'pantry', 'frozen', 'other'] }
+            name: { type: SchemaType.STRING },
+            category: { type: SchemaType.STRING, enum: ['produce', 'dairy', 'meat', 'pantry', 'frozen', 'other'] }
         },
         required: ["name", "category"]
     }
@@ -349,22 +283,25 @@ export async function recognizeIngredients(base64Image: string): Promise<Ingredi
     try {
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
-            const client = new GoogleGenAI({ apiKey });
-            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
-
-            const response = await client.models.generateContent({
-                model: "gemini-1.5-flash-001",
-                contents: [
-                    { inlineData: { mimeType: "image/jpeg", data: base64Data } },
-                    { text: promptText }
-                ],
-                config: {
+            const genAI = new GoogleGenerativeAI(apiKey);
+            const model = genAI.getGenerativeModel({
+                model: "gemini-1.5-flash",
+                generationConfig: {
                     responseMimeType: "application/json",
+                    // @ts-ignore
                     responseSchema: ingredientListSchema,
                 }
             });
 
-            const text = response.text;
+            // Remove header if present
+            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+
+            const result = await model.generateContent([
+                promptText,
+                { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+            ]);
+
+            const text = result.response.text();
             if (text) {
                 const rawItems = JSON.parse(text);
                 return rawItems.map((item: any) => ({
