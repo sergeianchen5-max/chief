@@ -12,11 +12,10 @@ const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 const OPENROUTER_MODELS = [
-    "google/gemini-2.0-flash-exp:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "google/gemma-3-27b-it:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
-    "mistralai/mistral-small-24b-instruct-2501:free",
+    "google/gemini-1.5-flash:free", // Reliable, fast
+    "google/gemini-2.0-flash-lite-preview-02-05:free", // New, fast
+    "meta-llama/llama-3-8b-instruct:free", // Fallback
+    "microsoft/phi-3-medium-128k-instruct:free", // Fallback
 ];
 
 const SITE_URL = process.env.VERCEL_URL
