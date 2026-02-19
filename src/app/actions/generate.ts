@@ -1,18 +1,16 @@
 'use server';
 
 // Allow streaming responses up to 60 seconds (max for Hobby/Pro on Vercel)
-// Max duration config moved to next.config.ts or vercel.json if needed
+// maxDuration configuration should be in page.tsx or next.config.ts
 
 import { SchemaType } from "@google/generative-ai";
 import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory } from "@/lib/types";
-import { HttpsProxyAgent } from 'https-proxy-agent';
+import { getProxyAgent } from "./proxy";
 
-// ===================== CONFIGURATION =====================
-
+// ===================== CONSTANTS =====================
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
-// OpenRouter Models 
 const OPENROUTER_MODELS = [
     "google/gemini-2.0-flash-exp:free",
     "meta-llama/llama-3.3-70b-instruct:free",
@@ -25,23 +23,11 @@ const SITE_URL = process.env.VERCEL_URL
     ? `https://${process.env.VERCEL_URL}`
     : "https://schef-xi.vercel.app";
 
-// Helper for type safety in responses
-export type GenerateResult =
+type GenerateResult =
     | { success: true; data: ChefPlan }
     | { success: false; error: string };
 
-// ===================== HELPERS =====================
-
-function getProxyAgent() {
-    const proxyUrl = process.env.PROXY_URL;
-    if (proxyUrl) {
-        console.log("[AI] 🛡️ Using Proxy:", proxyUrl.replace(/:[^:@]*@/, ':****@')); // Mask password
-        return new HttpsProxyAgent(proxyUrl);
-    }
-    return undefined;
-}
-
-// ===================== SCHEMAS (Gemini Fallback) =====================
+// ===================== SCHEMAS =====================
 const planSchema = {
     type: SchemaType.OBJECT,
     properties: {
@@ -106,8 +92,6 @@ const planSchema = {
     },
     required: ["summary", "recipes"]
 };
-
-// ===================== GENERATION LOGIC =====================
 
 export async function generateChefPlan(
     inventory: Ingredient[],
@@ -199,10 +183,6 @@ async function callGeminiWithProxy(prompt: string): Promise<GenerateResult> {
             }),
             // @ts-ignore - custom agent for node-fetch if used, or next.js might ignore it without custom config
             agent: agent,
-            // For standard fetch in Node 18+ (undici), we might need dispatcher, but https-proxy-agent works with node-fetch
-            // Next.js patches fetch, so this might be tricky. 
-            // If this fails in Next.js environment without node-fetch, we might need 'node-fetch' package explicitly.
-            // But let's try standard fetch property first which some environments support.
         });
 
         if (!response.ok) {
@@ -258,7 +238,6 @@ async function callOpenRouter(prompt: string): Promise<GenerateResult> {
 
             if (!response.ok) {
                 const text = await response.text();
-                // console.error(`[OpenRouter] ❌ ${model} failed status ${response.status}: ${text.substring(0, 200)}`);
                 lastError = `Status ${response.status}`;
                 continue;
             }
@@ -290,46 +269,4 @@ async function callOpenRouter(prompt: string): Promise<GenerateResult> {
     }
 
     return { success: false, error: `OpenRouter failed: ${lastError}` };
-}
-
-// ===================== VISION LOGIC =====================
-// Vision also needs proxy now
-export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
-    if (!base64Image) return [];
-    try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        const agent = getProxyAgent();
-
-        if (apiKey) {
-            // Using REST API for Vision to support Proxy
-            // endpoint: models/gemini-1.5-flash:generateContent
-            const url = `${GEMINI_API_URL}?key=${apiKey}`;
-
-            const response = await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    contents: [{
-                        parts: [
-                            { text: "List visible ingredients JSON: [{name, category}]" },
-                            { inlineData: { data: base64Image.replace(/^data:image\/\w+;base64,/, ""), mimeType: "image/jpeg" } }
-                        ]
-                    }]
-                }),
-                // @ts-ignore
-                agent: agent
-            });
-
-            if (!response.ok) throw new Error("Vision API failed");
-
-            const data = await response.json();
-            const txt = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-            if (txt) {
-                const json = JSON.parse(txt.replace(/```json/g, '').replace(/```/g, ''));
-                return json.map((i: any) => ({ id: Math.random().toString(), name: i.name, category: i.category || 'other' }));
-            }
-        }
-    } catch (e) { console.warn("Vision failed", e); }
-    return [];
 }

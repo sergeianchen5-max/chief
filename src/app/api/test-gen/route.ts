@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
-import { generateChefPlan } from '@/app/actions/ai';
+import { generateChefPlan } from "@/app/actions/generate";
 import { Ingredient, FamilyMember, Gender, ActivityLevel, GoalType } from '@/lib/types';
+
+export const maxDuration = 60;
 
 export async function GET() {
     try {

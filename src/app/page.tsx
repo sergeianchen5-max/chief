@@ -11,6 +11,9 @@ import { useUser } from '@/lib/hooks/useUser';
 import { useSupabaseSync } from '@/lib/hooks/useSupabaseSync';
 import Link from 'next/link';
 
+// Allow 60 seconds for AI generation
+export const maxDuration = 60;
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'fridge' | 'family' | 'chef' | 'recipes'>('chef');
   const { user, loading: authLoading, signOut } = useUser();
