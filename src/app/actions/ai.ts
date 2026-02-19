@@ -1,5 +1,8 @@
 'use server';
 
+// Allow streaming responses up to 60 seconds (max for Hobby/Pro on Vercel)
+// Max duration config moved to next.config.ts or vercel.json if needed
+
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory } from "@/lib/types";
 
@@ -7,13 +10,15 @@ import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, Me
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
-// Fallback models for OpenRouter (Free Tier priority)
+// OpenRouter Models 
 const OPENROUTER_MODELS = [
     "google/gemini-2.0-flash-exp:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemma-3-27b-it:free",
     "nousresearch/hermes-3-llama-3.1-405b:free",
     "mistralai/mistral-small-24b-instruct-2501:free",
+    // Fallback paid models if needed (commented out)
+    // "openai/gpt-3.5-turbo",
 ];
 
 const SITE_URL = process.env.VERCEL_URL
@@ -25,9 +30,7 @@ export type GenerateResult =
     | { success: true; data: ChefPlan }
     | { success: false; error: string };
 
-// ===================== SCHEMAS =====================
-
-// Strict Schema for Gemini
+// ===================== SCHEMAS (Gemini Fallback) =====================
 const planSchema = {
     type: SchemaType.OBJECT,
     properties: {
@@ -41,11 +44,11 @@ const planSchema = {
                     description: { type: SchemaType.STRING },
                     cookingTimeMinutes: { type: SchemaType.INTEGER },
                     difficulty: { type: SchemaType.STRING },
-                    ingredientsToUse: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients FROM FRIDGE with quantities calculated for the family. Format: 'Name (Quantity)', e.g., 'Carrots (200g)'" },
-                    missingIngredients: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING }, description: "List of ingredients TO BUY with quantities. Format: 'Name (Quantity)', e.g., 'Cream (500ml)'" },
+                    ingredientsToUse: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+                    missingIngredients: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
                     healthBenefits: { type: SchemaType.STRING },
                     weightPerServing: { type: SchemaType.STRING },
-                    totalWeightForFamily: { type: SchemaType.STRING, description: "Total weight of the cooked dish for the entire family (e.g. '1.2 kg')" },
+                    totalWeightForFamily: { type: SchemaType.STRING },
                     caloriesPerServing: { type: SchemaType.STRING },
                     protein: { type: SchemaType.STRING },
                     fats: { type: SchemaType.STRING },
@@ -58,25 +61,23 @@ const planSchema = {
                             type: SchemaType.OBJECT,
                             properties: {
                                 memberName: { type: SchemaType.STRING },
-                                percentage: { type: SchemaType.INTEGER, description: "Suitability score 0-100" },
+                                percentage: { type: SchemaType.INTEGER },
                                 reason: { type: SchemaType.STRING },
                                 nutritionStats: {
                                     type: SchemaType.OBJECT,
-                                    description: "Percentage of Daily Value (DV) for this specific person provided by ONE serving of this recipe.",
                                     properties: {
-                                        caloriesPercent: { type: SchemaType.INTEGER, description: "% of daily Calorie needs" },
-                                        proteinPercent: { type: SchemaType.INTEGER, description: "% of daily Protein needs" },
-                                        fatPercent: { type: SchemaType.INTEGER, description: "% of daily Fat needs" },
-                                        carbPercent: { type: SchemaType.INTEGER, description: "% of daily Carb needs" }
+                                        caloriesPercent: { type: SchemaType.INTEGER },
+                                        proteinPercent: { type: SchemaType.INTEGER },
+                                        fatPercent: { type: SchemaType.INTEGER },
+                                        carbPercent: { type: SchemaType.INTEGER }
                                     },
                                     required: ["caloriesPercent", "proteinPercent", "fatPercent", "carbPercent"]
                                 }
                             },
-                            required: ["memberName", "percentage", "reason", "nutritionStats"]
                         }
                     }
                 },
-                required: ["name", "description", "cookingTimeMinutes", "difficulty", "ingredientsToUse", "missingIngredients", "healthBenefits", "weightPerServing", "totalWeightForFamily", "caloriesPerServing", "protein", "fats", "carbs", "instructions", "mealType", "familySuitability"]
+                required: ["name"]
             }
         },
         shoppingList: {
@@ -86,13 +87,13 @@ const planSchema = {
                 properties: {
                     name: { type: SchemaType.STRING },
                     quantity: { type: SchemaType.STRING },
-                    reason: { type: SchemaType.STRING, description: "MUST be the EXACT name of the recipe requiring this item." }
+                    reason: { type: SchemaType.STRING }
                 },
-                required: ["name", "quantity", "reason"]
+                required: ["name"]
             }
         }
     },
-    required: ["summary", "recipes", "shoppingList"]
+    required: ["summary", "recipes"]
 };
 
 // ===================== GENERATION LOGIC =====================
@@ -121,60 +122,37 @@ export async function generateChefPlan(
     ).join("\n");
 
     const categoryDescriptions: Record<MealCategory, string> = {
-        breakfast: "- Breakfast (Завтрак): 2+ options.",
-        soup: "- Soup (Суп): 1+ options.",
-        main: "- Main Course (Обед/Ужин): 2+ options.",
-        dessert: "- Dessert (Десерт): 1+ options.",
-        salad: "- Salads (Салаты): 1+ options.",
-        drink: "- Drinks (Напитки): 1+ options."
+        breakfast: "- Breakfast (Завтрак)",
+        soup: "- Soup (Суп)",
+        main: "- Main Course (Обед/Ужин)",
+        dessert: "- Dessert (Десерт)",
+        salad: "- Salads await (Салаты)",
+        drink: "- Drinks (Напитки)"
     };
 
     const requestedCategories = categories.map(c => categoryDescriptions[c] || "").join("\n         ");
 
-    const categoriesSection = `
-         ${requestedCategories}
-         - Popular/Hits (Популярное): 2+ options. These MUST be universally loved "Hit" recipes.
-    `;
-
     const prompt = `
       Act as "Chef Fridge", a passionate Michelin-star chef and nutritionist.
-      Current Products (Fridge + Basic Pantry): ${inventoryList}
-      Family Profiles (Total members: ${activeFamily.length}):
-      ${familyProfiles} 
+      Inventories: ${inventoryList}
+      Family: ${familyProfiles} 
+      OnlyFridge: ${onlyFridge}.
       
-      CONSTRAINT: "Cook from Fridge Only" mode is set to: ${onlyFridge ? 'TRUE' : 'FALSE'}.
-      
-      Task:
-      1. Analyze Family Goals & Body Stats (Height/Weight/Gender) to estimate daily calorie needs (TDEE).
-      2. Create a MENU. 
-         ${onlyFridge
-            ? 'PRIORITY 1: Suggest recipes that use 100% of available ingredients. If impossible, missing ingredients must be minimal. PRIORITIZE EXISTING STOCK over variety.'
-            : 'Suggest balanced recipes. It is okay to buy new ingredients.'
-        }
-      3. SELECT RECIPES: Choose dishes that are popularly known to be delicious and have high ratings in culinary culture.
-      4. CATEGORIES:
-         ${categoriesSection}
-      
-      5. INSTRUCTIONS: Provide **EXTREMELY DETAILED** cooking instructions. 
-      
-      6. QUANTITIES (CRITICAL):
-         - In 'ingredientsToUse' and 'missingIngredients', you MUST specify the EXACT QUANTITY needed for the WHOLE FAMILY.
-         - Format: "Product Name (Quantity)". 
-         - Example: "Chicken Breast (600g)", "Carrots (2 medium)", "Milk (500ml)".
-         - Do NOT just list the name. 
-      
-      7. FAMILY SUITABILITY & NUTRITION (CRITICAL):
-         - For EACH recipe, populate 'familySuitability'.
-         - 'nutritionStats': Calculate what percentage of the person's Daily Norm (KBJU) is covered by ONE serving of this dish.
-         - Example: If Dad needs 2500kcal and the dish is 500kcal, caloriesPercent = 20.
-      
-      8. SHOPPING LIST:
-         - 'reason' field MUST be the EXACT name of the recipe string. If the recipe name is "Borscht with Cream", the reason must be "Borscht with Cream".
-      
-      9. LANGUAGE: Russian.
+      Task: Create a Menu JSON.
+      Language: Russian.
+      FORMAT: JSON with ChefPlan schema (summary, recipes[], shoppingList[]).
     `;
 
-    // 2. Try Gemini (Primary)
+    // 2. Try OpenRouter (Primary)
+    console.log("[AI] 🚀 Starting generation via OpenRouter...");
+    const openRouterResult = await callOpenRouter(prompt);
+
+    if (openRouterResult.success) {
+        return openRouterResult;
+    }
+
+    // 3. Try Gemini Fallback (Secondary)
+    console.warn(`[AI] ⚠️ OpenRouter failed: ${openRouterResult.error}. Trying Gemini Direct...`);
     try {
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) throw new Error("GEMINI_API_KEY not found");
@@ -184,7 +162,7 @@ export async function generateChefPlan(
             model: "gemini-1.5-flash",
             generationConfig: {
                 responseMimeType: "application/json",
-                // @ts-ignore - Schema mismatch between types but works at runtime
+                // @ts-ignore
                 responseSchema: planSchema,
             },
         });
@@ -192,10 +170,7 @@ export async function generateChefPlan(
         const result = await model.generateContent(prompt);
         const responseText = result.response.text();
 
-        console.log("🔍 [AI] Raw response length:", responseText?.length);
-
         if (responseText) {
-            // Clean up Markdown if present
             const cleanText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
             const plan = JSON.parse(cleanText) as ChefPlan;
             return { success: true, data: plan };
@@ -203,18 +178,26 @@ export async function generateChefPlan(
         throw new Error("Empty response from Gemini");
 
     } catch (error: any) {
-        console.warn(`[AI] ⚠️ Gemini Error: ${error.message}. Switching to OpenRouter Fallback...`);
-        return await callOpenRouterFallback(prompt);
+        console.error(`[AI] ❌ All providers failed. Gemini Error: ${error.message}`);
+
+        let msg = "Сервис перегружен. Попробуйте позже.";
+        if (error.message.includes("404")) msg = "Ошибка доступа к AI (Геоблокировка).";
+
+        return { success: false, error: msg };
     }
 }
 
-async function callOpenRouterFallback(prompt: string): Promise<GenerateResult> {
+async function callOpenRouter(prompt: string): Promise<GenerateResult> {
     const apiKey = process.env.OPENROUTER_API_KEY;
+    console.log(`[OpenRouter] Extension Key Check: ${apiKey ? 'Present' : 'MISSING'}`);
+
     if (!apiKey) return { success: false, error: "OpenRouter Key Missing" };
+
+    let lastError = "";
 
     for (const model of OPENROUTER_MODELS) {
         try {
-            console.log(`[OpenRouter] Trying ${model}...`);
+            console.log(`[OpenRouter] 🔄 Trying ${model}...`);
             const response = await fetch(OPENROUTER_API_URL, {
                 method: "POST",
                 headers: {
@@ -226,94 +209,72 @@ async function callOpenRouterFallback(prompt: string): Promise<GenerateResult> {
                 body: JSON.stringify({
                     model,
                     messages: [{ role: "user", content: prompt }],
-                    // Use 'json_object' mode instead of 'json_schema' for better compatibility with free models like Llama 3
                     response_format: { type: "json_object" },
                 })
             });
 
             if (!response.ok) {
                 const text = await response.text();
-                // console.warn(`[OpenRouter] ${model} failed: ${text}`); 
+                console.error(`[OpenRouter] ❌ ${model} failed status ${response.status}: ${text.substring(0, 200)}`);
+                lastError = `Status ${response.status}`;
                 continue;
             }
 
             const data = await response.json();
             const content = data.choices?.[0]?.message?.content;
-            if (!content) continue;
 
-            // Try to parse JSON from content (it might be wrapped in ```json ... ```)
+            if (!content) {
+                console.warn(`[OpenRouter] Empty content from ${model}`);
+                continue;
+            }
+
+            // Try to parse JSON
             const cleanContent = content.replace(/```json/g, '').replace(/```/g, '').trim();
-
             const plan = JSON.parse(cleanContent) as ChefPlan;
 
             // Basic validation
             if (!plan.recipes || !Array.isArray(plan.recipes)) {
-                throw new Error("Invalid structure from OpenRouter");
+                console.warn(`[OpenRouter] Invalid JSON structure from ${model}`);
+                throw new Error("Invalid structure");
             }
 
+            console.log(`[OpenRouter] ✅ Success with ${model}`);
             return { success: true, data: plan };
         } catch (e: any) {
-            console.warn(`[OpenRouter] Failed ${model}`, e.message);
+            console.warn(`[OpenRouter] Exception with ${model}:`, e.message);
+            lastError = e.message;
         }
     }
 
-    return { success: false, error: "Все AI сервисы недоступны. Попробуйте позже." };
+    return { success: false, error: `OpenRouter failed: ${lastError}` };
 }
 
 // ===================== VISION LOGIC =====================
-
 const ingredientListSchema = {
     type: SchemaType.ARRAY,
     items: {
         type: SchemaType.OBJECT,
-        properties: {
-            name: { type: SchemaType.STRING },
-            category: { type: SchemaType.STRING, enum: ['produce', 'dairy', 'meat', 'pantry', 'frozen', 'other'] }
-        },
-        required: ["name", "category"]
+        properties: { name: { type: SchemaType.STRING }, category: { type: SchemaType.STRING } }
     }
 };
 
 export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
     if (!base64Image) return [];
-
-    const promptText = "Analyze this image. Identify all visible food ingredients. Return list with categories. Language: Russian.";
-
-    // 1. Gemini Vision
     try {
         const apiKey = process.env.GEMINI_API_KEY;
         if (apiKey) {
             const genAI = new GoogleGenerativeAI(apiKey);
-            const model = genAI.getGenerativeModel({
-                model: "gemini-1.5-flash",
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    // @ts-ignore
-                    responseSchema: ingredientListSchema,
-                }
-            });
-
-            // Remove header if present
-            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+            const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // No schema for vision due to complexity
 
             const result = await model.generateContent([
-                promptText,
-                { inlineData: { data: base64Data, mimeType: "image/jpeg" } }
+                "List visible ingredients JSON: [{name, category}]",
+                { inlineData: { data: base64Image.replace(/^data:image\/\w+;base64,/, ""), mimeType: "image/jpeg" } }
             ]);
 
-            const text = result.response.text();
-            if (text) {
-                const rawItems = JSON.parse(text);
-                return rawItems.map((item: any) => ({
-                    id: Date.now().toString() + Math.random().toString().slice(2, 6),
-                    name: item.name,
-                    category: item.category
-                }));
-            }
+            const txt = result.response.text();
+            const json = JSON.parse(txt.replace(/```json/g, '').replace(/```/g, ''));
+            return json.map((i: any) => ({ id: Math.random().toString(), name: i.name, category: i.category || 'other' }));
         }
-    } catch (e) {
-        console.warn("Gemini Vision failed", e);
-    }
-
+    } catch (e) { console.warn("Vision failed", e); }
     return [];
 }

@@ -1,0 +1,464 @@
+'use server';
+
+import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory, MEAL_CATEGORIES } from "@/lib/types";
+import { generatePlanSchema } from "@/lib/schemas";
+
+// Тип результата для безопасной передачи ошибок в production
+export type GenerateResult =
+    | { success: true; data: ChefPlan }
+    | { success: false; error: string };
+
+// ===================== КОНФИГУРАЦИЯ =====================
+
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const GEMINI_API_URL_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+// Fallback-модели OpenRouter (Только самые быстрые и доступные!)
+const OPENROUTER_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",           // Llama 3.3
+    "google/gemma-3-27b-it:free",                       // Gemma 3
+    "nousresearch/hermes-3-llama-3.1-405b:free",        // Hermes 3 (405B!)
+    "deepseek/deepseek-r1:free",                        // DeepSeek R1 (умная)
+    "mistralai/mistral-small-24b-instruct-2501:free",   // Mistral Small 3
+    "microsoft/phi-3-medium-128k-instruct:free",        // Phi-3
+];
+
+const SITE_URL = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "https://schef-xi.vercel.app";
+
+function sleep(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ===================== GEMINI API (ОСНОВНОЙ) - REST =====================
+
+async function callGemini(systemPrompt: string, userPrompt: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        throw new Error("GEMINI_API_KEY не задан");
+    }
+
+    console.log(`[Gemini] 🚀 Запрос к Gemini 1.5 Flash (REST)...`);
+
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000); // 15 секунд таймаут
+
+        const url = `${GEMINI_API_URL_BASE}/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+        const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+                generationConfig: {
+                    temperature: 0.5,
+                    maxOutputTokens: 4000
+                }
+            }),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Gemini Error ${response.status}: ${errText.substring(0, 200)}`);
+        }
+
+        const data = await response.json();
+        const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!content || content.trim().length === 0) {
+            throw new Error("Gemini вернул пустой ответ");
+        }
+
+        console.log(`[Gemini] ✅ Ответ получен (${content.length} символов)`);
+        return content;
+
+    } catch (error: any) {
+        if (error.name === 'AbortError') {
+            console.warn(`[Gemini] ⏰ Таймаут (15с)`);
+            throw new Error("Gemini timeout (15s)");
+        }
+        console.warn(`[Gemini] ⚠️ Ошибка: ${error.message}`);
+        throw error;
+    }
+}
+
+// ===================== OPENROUTER API (FALLBACK) =====================
+
+async function callOpenRouter(systemPrompt: string, userPrompt: string): Promise<string> {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+        throw new Error("OPENROUTER_API_KEY не задан в .env.local");
+    }
+
+    // Перебираем модели
+    for (const model of OPENROUTER_MODELS) {
+        console.log(`[OpenRouter] 🚀 Пробуем ${model}...`);
+
+        // Для каждой модели делаем до 2 попыток при 429
+        for (let attempt = 0; attempt < 2; attempt++) {
+            if (attempt > 0) {
+                console.log(`[OpenRouter] ⏳ Пауза перед повтором для ${model}...`);
+                await sleep(2000 * attempt); // 2 сек, потом больше
+            }
+
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 20000); // 20 секунд макс
+
+                const response = await fetch(OPENROUTER_API_URL, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${apiKey}`,
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": SITE_URL,
+                        "X-Title": "Schef Fridge",
+                    },
+                    body: JSON.stringify({
+                        model,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt },
+                        ],
+                        temperature: 0.5,
+                        max_tokens: 4000,
+                    }),
+                    signal: controller.signal,
+                });
+
+                clearTimeout(timeout);
+
+                if (response.status === 429) {
+                    console.warn(`[OpenRouter] ⚠️ 429 Rate Limit для ${model}. Попытка ${attempt + 1}/2.`);
+                    continue; // Повторить попытку (внутренний цикл)
+                }
+
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    console.error(`[OpenRouter] ❌ ${response.status} от ${model}:`, errorBody.substring(0, 200));
+                    break; // Не повторять для этой модели (перейти к следующей)
+                }
+
+                const data = await response.json() as any;
+                const content = data?.choices?.[0]?.message?.content;
+
+                if (!content || content.trim().length === 0) {
+                    console.warn(`[OpenRouter] ⚠️ Пустой ответ от ${model}.`);
+                    break;
+                }
+
+                console.log(`[OpenRouter] ✅ Успех: ${model}`);
+                return content;
+
+            } catch (error: any) {
+                if (error.name === 'AbortError') {
+                    console.warn(`[OpenRouter] ⏰ Таймаут 20с для ${model}.`);
+                } else {
+                    console.error(`[OpenRouter] ❌ Ошибка сети ${model}:`, error.message);
+                }
+                break; // Ошибка сети/таймаут -> следующая модель
+            }
+        }
+    }
+
+    throw new Error("Все модели недоступны (перегружены 429 или 404). Попробуйте позже.");
+}
+
+// ===================== УНИВЕРСАЛЬНЫЙ ВЫЗОВ =====================
+
+async function callAI(systemPrompt: string, userPrompt: string): Promise<string> {
+    // 1. Gemini — основной
+    try {
+        return await callGemini(systemPrompt, userPrompt);
+    } catch (error: any) {
+        console.warn(`[AI] ⚠️ Gemini недоступен: ${error.message}. Переключаемся на OpenRouter...`);
+    }
+
+    // 2. OpenRouter — fallback
+    return await callOpenRouter(systemPrompt, userPrompt);
+}
+
+// Извлекает JSON из ответа модели
+function extractJSON(text: string): string {
+    let cleaned = text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+    const jsonBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (jsonBlockMatch) return jsonBlockMatch[1].trim();
+
+    const jsonObjMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonObjMatch) return jsonObjMatch[0].trim();
+
+    const jsonArrMatch = cleaned.match(/\[[\s\S]*\]/);
+    if (jsonArrMatch) return jsonArrMatch[0].trim();
+
+    return cleaned;
+}
+
+// ===================== ГЕНЕРАЦИЯ МЕНЮ =====================
+
+const SYSTEM_PROMPT = `Ты — JSON-генератор меню. Отвечай СТРОГО ТОЛЬКО валидным JSON. Без текста до или после JSON. Без markdown-обёрток. Без объяснений. Только JSON.`;
+
+// Маппинг категорий → описание для промпта
+const CATEGORY_PROMPT_MAP: Record<MealCategory, string> = {
+    breakfast: 'Завтрак: 1-2 блюда (каши, омлеты, сырники, бутерброды)',
+    salad: 'Салаты и закуски: 1-2 блюда (свежие, тёплые, лёгкие)',
+    soup: 'Первое блюдо (суп): 1 блюдо (борщ, щи, крем-суп, бульон)',
+    main: 'Второе блюдо: 1-2 блюда (мясо, рыба, птица + гарнир)',
+    dessert: 'Десерт/выпечка: 1 блюдо (пирожки, торт, блины с начинкой)',
+    drink: 'Напиток: 1 (компот, смузи, морс, кисель)',
+};
+
+export async function generateChefPlan(
+    inventory: Ingredient[],
+    family: FamilyMember[],
+    onlyFridge: boolean,
+    categories: MealCategory[] = ['breakfast', 'soup', 'main', 'dessert']
+): Promise<GenerateResult> {
+
+    let activeFamily = family;
+    if (!activeFamily || activeFamily.length === 0) {
+        activeFamily = [{
+            id: 'default', name: 'Тестер', age: 30, gender: Gender.MALE,
+            height: 180, weight: 75, activityLevel: ActivityLevel.MODERATE,
+            goal: GoalType.MAINTENANCE, preferences: 'Всеядный'
+        }];
+    }
+
+    const validation = generatePlanSchema.safeParse({ inventory, family: activeFamily, onlyFridge, categories });
+    if (!validation.success) {
+        return { success: false, error: "Ошибка валидации: " + validation.error.message };
+    }
+
+    const inventoryList = (inventory.length > 0 ? inventory.map(i => i.name).join(", ") : "Пустой холодильник") + ", Вода, Соль, Перец";
+
+    const familyProfiles = activeFamily.map(f =>
+        `- ${f.name}: ${f.gender}, ${f.age} лет, ${f.height}см, ${f.weight}кг. Активность: ${f.activityLevel}. Цель: ${f.goal}. Предпочтения: ${f.preferences}.`
+    ).join("\n");
+
+    // Динамический список блюд по выбранным категориям
+    const menuItems = categories
+        .map(cat => `- ${CATEGORY_PROMPT_MAP[cat]}`)
+        .join("\n");
+
+    const prompt = `Продукты: ${inventoryList}
+Семья (${activeFamily.length} чел.):
+${familyProfiles}
+
+Только из холодильника: ${onlyFridge ? 'ДА' : 'НЕТ'}.
+
+Создай меню:
+${menuItems}
+
+Для каждого: краткие пошаговые инструкции, ингредиенты с количеством, КБЖУ, процент от нормы каждого члена семьи.
+Список покупок: reason = название рецепта.
+ВСЁ на русском.
+
+JSON:
+{
+  "summary": "краткое описание",
+  "recipes": [
+    {
+      "name": "название",
+      "description": "описание",
+      "cookingTimeMinutes": 30,
+      "difficulty": "легко|средне|сложно",
+      "ingredientsToUse": ["Название (Кол-во)"],
+      "missingIngredients": ["Название (Кол-во)"],
+      "healthBenefits": "польза",
+      "weightPerServing": "250г",
+      "totalWeightForFamily": "1кг",
+      "caloriesPerServing": "350 ккал",
+      "protein": "25г",
+      "fats": "15г",
+      "carbs": "30г",
+      "instructions": ["шаг 1", "шаг 2"],
+      "mealType": ["Завтрак"],
+      "familySuitability": [
+        {
+          "memberName": "Имя",
+          "percentage": 85,
+          "reason": "причина",
+          "nutritionStats": {
+            "caloriesPercent": 14,
+            "proteinPercent": 20,
+            "fatPercent": 18,
+            "carbPercent": 10
+          }
+        }
+      ]
+    }
+  ],
+  "shoppingList": [
+    { "name": "продукт", "quantity": "кол-во", "reason": "Название Рецепта" }
+  ]
+}`;
+
+    try {
+        const rawResponse = await callAI(SYSTEM_PROMPT, prompt);
+        const jsonStr = extractJSON(rawResponse);
+        const plan = JSON.parse(jsonStr) as ChefPlan;
+        console.log(`[AI] ✅ Меню: ${plan.recipes?.length || 0} рецептов`);
+        return { success: true, data: plan };
+    } catch (error: any) {
+        console.error("Ошибка генерации меню:", error.message);
+        return { success: false, error: error.message || 'Неизвестная ошибка' };
+    }
+}
+
+// ===================== РАСПОЗНАВАНИЕ ПРОДУКТОВ =====================
+
+const VISION_MODELS = [
+    "google/gemma-3-27b-it:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+];
+
+export async function recognizeIngredients(base64Image: string): Promise<Ingredient[]> {
+    if (!base64Image) throw new Error("Изображение не предоставлено");
+
+    // 1. Попробовать Gemini Vision
+    try {
+        const apiKey = process.env.GEMINI_API_KEY;
+        if (apiKey) {
+            console.log(`[Vision] 🚀 Gemini Vision (REST)...`);
+
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15000); // 15s
+
+            const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+            const url = `${GEMINI_API_URL_BASE}/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contents: [{
+                        role: "user",
+                        parts: [
+                            { inlineData: { mimeType: "image/jpeg", data: base64Data } },
+                            { text: `Посмотри на фото холодильника или продуктов. Перечисли ВСЕ продукты.\nОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом:\n[{"name": "Название (RU)", "category": "produce|dairy|meat|pantry|frozen|other"}]` }
+                        ]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1,
+                        maxOutputTokens: 1000
+                    }
+                }),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeout);
+
+            if (response.ok) {
+                const data = await response.json();
+                const content = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (content) {
+                    const jsonStr = extractJSON(content);
+                    const rawItems = JSON.parse(jsonStr);
+                    if (Array.isArray(rawItems)) {
+                        console.log(`[Vision] ✅ Gemini распознал ${rawItems.length} продуктов`);
+                        return rawItems.map((item: any) => ({
+                            id: Date.now().toString() + Math.random().toString().slice(2, 6),
+                            name: item.name,
+                            category: item.category || 'other'
+                        }));
+                    }
+                }
+            } else {
+                console.warn(`[Vision] ⚠️ Gemini Error: ${response.status}`);
+            }
+        }
+    } catch (error: any) {
+        console.warn(`[Vision] ⚠️ Gemini Vision ошибка: ${error.message}. Fallback на OpenRouter...`);
+    }
+
+    // 2. OpenRouter fallback
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) throw new Error("OPENROUTER_API_KEY не задан");
+
+    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, "");
+
+    for (let modelIdx = 0; modelIdx < VISION_MODELS.length; modelIdx++) {
+        const model = VISION_MODELS[modelIdx];
+        console.log(`[Vision] 👁️ Пробуем ${model}...`);
+
+        try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 20000); // 20 сек
+
+            const response = await fetch(OPENROUTER_API_URL, {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${apiKey}`,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": SITE_URL,
+                    "X-Title": "Schef Fridge",
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: [
+                        {
+                            role: "user",
+                            content: [
+                                { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Data}` } },
+                                {
+                                    type: "text",
+                                    text: `Посмотри на фото холодильника или продуктов. Перечисли ВСЕ продукты, которые видишь.
+ОТВЕТЬ СТРОГО ТОЛЬКО ВАЛИДНЫМ JSON массивом объектов (без Markdown, без 'json'):
+[{"name": "Название (RU)", "category": "produce|dairy|meat|pantry|frozen|other"}]`
+                                }
+                            ]
+                        }
+                    ],
+                    temperature: 0.1,
+                    max_tokens: 1000,
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeout);
+
+            if (response.status === 429) {
+                console.warn(`[Vision] ⏳ 429 от ${model}.`);
+                continue;
+            }
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                console.error(`[OpenRouter] ❌ ${response.status} от ${model}:`, errorBody.substring(0, 200));
+                continue;
+            }
+
+            const data = await response.json() as any;
+            const content = data?.choices?.[0]?.message?.content;
+
+            if (!content) {
+                console.warn(`[Vision] ⚠️ Пустой ответ от ${model}`);
+                continue;
+            }
+
+            console.log(`[Vision] ✅ Успех (${model})`);
+
+            const jsonStr = extractJSON(content);
+            const rawItems = JSON.parse(jsonStr);
+
+            if (!Array.isArray(rawItems)) throw new Error("Ответ не является массивом");
+
+            return rawItems.map((item: any) => ({
+                id: Date.now().toString() + Math.random().toString().slice(2, 6),
+                name: item.name,
+                category: item.category || 'other'
+            }));
+
+        } catch (error: any) {
+            console.error(`[Vision] 💥 Ошибка ${model}:`, error.message);
+        }
+    }
+
+    throw new Error("Не удалось распознать продукты. Все Vision-модели недоступны или не поняли фото.");
+}
