@@ -10,7 +10,7 @@ import { HttpsProxyAgent } from 'https-proxy-agent';
 // ===================== CONFIGURATION =====================
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 // OpenRouter Models 
 const OPENROUTER_MODELS = [
