@@ -3,14 +3,23 @@
 import React, { useEffect, useState } from 'react';
 import { getPendingRecipes, updateRecipeStatus } from '@/app/actions/admin';
 import { useUser } from '@/lib/hooks/useUser';
-import { ShieldCheck, Check, X, Eye, Loader2, Clock } from 'lucide-react';
+import { ShieldCheck, Check, X, Eye, Loader2, Clock, LogIn } from 'lucide-react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 export default function AdminPage() {
     const { user, loading: authLoading } = useUser();
     const [recipes, setRecipes] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+
+    // Добавляем состояния для формы логина
+    const [email, setEmail] = useState('anchen-ser@yandex.ru');
+    const [password, setPassword] = useState('');
+    const [loginError, setLoginError] = useState('');
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+    const supabase = createClient();
 
     const checkAndLoad = async () => {
         try {
@@ -30,13 +39,14 @@ export default function AdminPage() {
     };
 
     useEffect(() => {
-        if (authLoading) return; // Ждем окончания проверки авторизации
+        if (authLoading) return;
 
         if (user?.id) {
             checkAndLoad();
         } else {
-            setError('Требуется авторизация');
-            setLoading(false); // Важно: снимаем лоадер, если пользователя нет
+            // Если пользователя нет, скрываем лоадер, чтобы отобразилась форма логина
+            setLoading(false);
+            setError(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id, authLoading]);
@@ -53,21 +63,86 @@ export default function AdminPage() {
         }
     };
 
+    const handleLogin = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setIsLoggingIn(true);
+        setLoginError('');
+
+        const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
+
+        if (error) {
+            setLoginError('Ошибка входа: Неверный логин или пароль');
+            setIsLoggingIn(false);
+        }
+        // В случае успеха onAuthStateChange обновит user
+    };
+
     if (authLoading || loading) {
-        return <div className="min-h-screen flex justify-center items-center"><Loader2 className="animate-spin text-orange-500" size={48} /></div>;
+        return <div className="min-h-screen flex justify-center items-center bg-gray-50"><Loader2 className="animate-spin text-orange-500" size={48} /></div>;
+    }
+
+    if (!user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+                <form onSubmit={handleLogin} className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 max-w-sm w-full">
+                    <ShieldCheck size={48} className="mx-auto text-orange-500 mb-4" />
+                    <h1 className="text-xl font-extrabold text-gray-900 mb-6 text-center">Админ Панель</h1>
+
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email / Логин</label>
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-orange-500 focus:bg-white transition-colors"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Пароль</label>
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-orange-500 focus:bg-white transition-colors"
+                                required
+                            />
+                        </div>
+
+                        {loginError && (
+                            <p className="text-red-500 text-sm text-center py-1">{loginError}</p>
+                        )}
+
+                        <button
+                            type="submit"
+                            disabled={isLoggingIn || !email || !password}
+                            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-400 to-red-500 text-white py-3 rounded-xl font-bold hover:shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
+                        >
+                            {isLoggingIn ? <Loader2 className="animate-spin" size={20} /> : <LogIn size={20} />}
+                            {isLoggingIn ? 'Вход...' : 'Войти'}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        );
     }
 
     if (error) {
         return (
             <div className="min-h-screen flex justify-center items-center bg-gray-50 p-4">
-                <div className="bg-white p-8 rounded-2xl shadow-sm text-center max-w-sm w-full">
+                <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center max-w-sm w-full">
                     <ShieldCheck size={48} className="mx-auto text-red-500 mb-4" />
                     <h1 className="text-xl font-bold text-gray-900 mb-2">Доступ запрещен</h1>
                     <p className="text-gray-600 mb-6">{error}</p>
-                    <Link href="/" className="text-orange-600 hover:underline">Вернуться на главную</Link>
+                    <Link href="/" className="text-orange-600 font-semibold hover:underline">Вернуться на главную</Link>
                 </div>
             </div>
         );
+
     }
 
     const pending = recipes.filter(r => r.moderation_status === 'pending');
