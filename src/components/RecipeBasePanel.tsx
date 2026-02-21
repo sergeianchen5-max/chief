@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { Recipe } from '@/lib/types';
-import { BookOpen, Clock, Scale, Trash2, ChevronDown, ChevronUp, Utensils, Share2 } from 'lucide-react';
+import { BookOpen, Clock, Scale, Trash2, ChevronDown, ChevronUp, Utensils, Share2, ShoppingCart, Check } from 'lucide-react';
+import { addItemsToShoppingList } from '@/app/actions/shopping';
 
 interface RecipeBasePanelProps {
     savedRecipes: Recipe[];
@@ -11,6 +12,8 @@ interface RecipeBasePanelProps {
 
 export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, onRemoveRecipe }) => {
     const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
+    const [addingToList, setAddingToList] = useState<string | null>(null);
+    const [addedToList, setAddedToList] = useState<string | null>(null);
 
     const toggleInstructions = (id: string) => {
         if (expandedRecipe === id) {
@@ -33,6 +36,27 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
             });
     };
 
+    const handleAddShopping = async (recipe: Recipe) => {
+        if (!recipe.id || recipe.missingIngredients.length === 0) return;
+        setAddingToList(recipe.id);
+
+        const items = recipe.missingIngredients.map(name => ({
+            name,
+            quantity: '',
+            reason: ''
+        }));
+
+        const res = await addItemsToShoppingList(recipe.id, items);
+
+        setAddingToList(null);
+        if (res.success) {
+            setAddedToList(recipe.id);
+            setTimeout(() => setAddedToList(null), 3000);
+        } else {
+            alert('Ошибка добавления: ' + res.error);
+        }
+    };
+
     return (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col">
             <div className="flex items-center gap-2 mb-6 text-purple-600">
@@ -51,15 +75,26 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
                         const recipeId = recipe.id || index.toString();
                         return (
                             <div key={recipeId} className="border border-purple-100 rounded-xl p-4 bg-purple-50 hover:shadow-md transition-shadow relative">
-                                <div className="flex justify-between items-start mb-2">
-                                    <div>
-                                        <h3 className="font-bold text-lg text-gray-900">{recipe.name}</h3>
-                                        <div className="flex flex-wrap gap-1 mt-1">
-                                            {recipe.mealType && recipe.mealType.map((type, tIdx) => (
-                                                <span key={tIdx} className="bg-white text-purple-600 border border-purple-100 text-[10px] px-2 py-0.5 rounded-full font-medium">
-                                                    {type}
-                                                </span>
-                                            ))}
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="flex gap-4 items-start">
+                                        {recipe.imageUrl ? (
+                                            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-2xl overflow-hidden bg-gray-100 flex items-center justify-center border border-purple-100 shadow-sm">
+                                                <img src={recipe.imageUrl} alt={recipe.name} className="w-full h-full object-cover" />
+                                            </div>
+                                        ) : (
+                                            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 bg-purple-100 rounded-2xl flex items-center justify-center text-purple-300">
+                                                <Utensils size={32} />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <h3 className="font-bold text-lg text-gray-900 leading-tight mb-1">{recipe.name}</h3>
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {recipe.mealType && recipe.mealType.map((type, tIdx) => (
+                                                    <span key={tIdx} className="bg-white text-purple-600 border border-purple-100 text-[10px] px-2 py-0.5 rounded-full font-medium shadow-sm">
+                                                        {type}
+                                                    </span>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
@@ -79,6 +114,25 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
                                         </button>
                                     </div>
                                 </div>
+
+                                {/* Добавление покупок */}
+                                {recipe.missingIngredients && recipe.missingIngredients.length > 0 && (
+                                    <div className="mb-3">
+                                        <button
+                                            onClick={() => handleAddShopping(recipe)}
+                                            disabled={addingToList === recipeId || addedToList === recipeId}
+                                            className={`w-full flex justify-center items-center gap-2 py-2 rounded-lg text-sm font-semibold transition-colors ${addedToList === recipeId ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
+                                        >
+                                            {addingToList === recipeId ? (
+                                                <span className="animate-pulse">Добавляем...</span>
+                                            ) : addedToList === recipeId ? (
+                                                <><Check size={16} /> В списке покупок</>
+                                            ) : (
+                                                <><ShoppingCart size={16} /> Купить недостающее ({recipe.missingIngredients.length})</>
+                                            )}
+                                        </button>
+                                    </div>
+                                )}
 
                                 <div className="flex gap-4 mb-3 text-sm text-gray-600">
                                     <span className="flex items-center gap-1"><Clock size={14} /> {recipe.cookingTimeMinutes} мин</span>

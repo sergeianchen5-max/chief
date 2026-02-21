@@ -6,6 +6,11 @@
 import { SchemaType } from "@google/generative-ai";
 import { ChefPlan, FamilyMember, Ingredient, Gender, GoalType, ActivityLevel, MealCategory } from "@/lib/types";
 import { getProxyAgent } from "./proxy";
+import { hashIngredients } from "@/lib/hash";
+import { generatePlanSchema } from "@/lib/schemas";
+import { checkRateLimit } from "@/lib/ratelimit";
+import { createClient } from "@/lib/supabase/server";
+import { fetchRecipeImage } from "./unsplash";
 
 // ===================== CONSTANTS =====================
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -99,7 +104,71 @@ export async function generateChefPlan(
     categories: MealCategory[] = ['breakfast', 'soup', 'main', 'dessert']
 ): Promise<GenerateResult> {
 
-    // 1. Prepare Data
+    // 1. Zod Validation
+    const validationResult = generatePlanSchema.safeParse({ inventory, family, onlyFridge, categories });
+    if (!validationResult.success) {
+        return { success: false, error: validationResult.error.issues[0]?.message || "Ошибка валидации" };
+    }
+
+    // 2. Rate Limiting (по IP или общему ключу)
+    const { success: rateLimitSuccess } = await checkRateLimit("global_generate");
+    if (!rateLimitSuccess) {
+        return { success: false, error: "Слишком много запросов. Пожалуйста, подождите минуту." };
+    }
+
+    const supabase = await createClient();
+
+    // 2.5 USER LIMITS (Business Logic)
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+        const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        if (profile) {
+            const isPro = profile.subscription_tier === 'pro' && profile.subscription_active;
+
+            // Если не Pro, проверяем ежедневные лимиты
+            if (!isPro) {
+                const now = new Date();
+                const resetDate = new Date(profile.daily_generations_reset_at);
+
+                // Если прошли сутки с момента последнего сброса, обнуляем счетчик
+                if (now.getTime() - resetDate.getTime() > 24 * 60 * 60 * 1000) {
+                    await supabase.from('profiles').update({
+                        daily_generations_count: 0,
+                        daily_generations_reset_at: now.toISOString()
+                    }).eq('id', user.id);
+                    profile.daily_generations_count = 0;
+                }
+
+                if (profile.daily_generations_count >= 5) {
+                    return { success: false, error: "Достигнут дневной лимит генераций. Перейдите на PRO." };
+                }
+
+                // Увеличиваем счетчик (сделаем это в конце, если генерация успешна)
+            }
+        }
+    }
+
+    // 3. Hash Check & Cache
+    const inventoryHash = hashIngredients(inventory.map(i => i.name));
+
+    try {
+        const { data: cachedRecipes, error: cacheError } = await supabase
+            .from('recipes')
+            .select('content')
+            .eq('inventory_hash', inventoryHash)
+            .limit(5);
+
+        if (cachedRecipes && cachedRecipes.length > 0) {
+            console.log(`[AI] ⚡ Вернули рецепт из кеша (hash: ${inventoryHash})`);
+            const randomCached = cachedRecipes[Math.floor(Math.random() * cachedRecipes.length)];
+            // @ts-ignore
+            return { success: true, data: randomCached.content as ChefPlan };
+        }
+    } catch (e) {
+        console.error("[Db] Cache check failed", e);
+    }
+
+    // 4. Prepare Data
     let activeFamily = family;
     if (!activeFamily || activeFamily.length === 0) {
         activeFamily = [{
@@ -137,27 +206,74 @@ export async function generateChefPlan(
       FORMAT: JSON with ChefPlan schema (summary, recipes[], shoppingList[]).
     `;
 
-    // 2. Try Gemini Direct via Proxy (Primary)
+    // 5. Generate AI
+    let finalResult: GenerateResult | null = null;
+
     console.log("[AI] 🚀 Starting generation via Gemini (Proxy)...");
     const geminiResult = await callGeminiWithProxy(prompt);
 
     if (geminiResult.success) {
-        return geminiResult;
+        finalResult = geminiResult;
+    } else {
+        console.warn(`[AI] ⚠️ Gemini failed: ${geminiResult.error}. Trying OpenRouter...`);
+        const openRouterResult = await callOpenRouter(prompt);
+        if (openRouterResult.success) {
+            finalResult = openRouterResult;
+        } else {
+            return {
+                success: false,
+                error: `Все сервисы недоступны. Gemini: ${geminiResult.error}, OpenRouter: ${openRouterResult.error}`
+            };
+        }
     }
 
-    // 3. Try OpenRouter (Secondary / Fallback)
-    console.warn(`[AI] ⚠️ Gemini failed: ${geminiResult.error}. Trying OpenRouter...`);
-
-    const openRouterResult = await callOpenRouter(prompt);
-
-    if (openRouterResult.success) {
-        return openRouterResult;
+    // 6. Fetch Images from Unsplash
+    if (finalResult && finalResult.success && finalResult.data.recipes) {
+        console.log("[AI] 📸 Загрузка изображений с Unsplash...");
+        for (let i = 0; i < finalResult.data.recipes.length; i++) {
+            const recipe = finalResult.data.recipes[i];
+            const imageUrl = await fetchRecipeImage(recipe.name);
+            if (imageUrl) {
+                recipe.imageUrl = imageUrl;
+            }
+        }
     }
 
-    return {
-        success: false,
-        error: `Все сервисы недоступны. Gemini: ${geminiResult.error}, OpenRouter: ${openRouterResult.error}`
-    };
+    // 7. Save to DB Cache & Update Limits
+    if (finalResult && finalResult.success) {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            const summaryTitle = finalResult.data.summary ? finalResult.data.summary.substring(0, 50) : "План питания от ИИ";
+
+            await supabase.from('recipes').insert({
+                title: summaryTitle,
+                slug: `${inventoryHash}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                ingredients_input: inventory.map(i => i.name),
+                inventory_hash: inventoryHash,
+                content: finalResult.data as any,
+                user_id: user?.id || null,
+                is_public: false,
+                moderation_status: 'pending'
+            });
+            console.log(`[Db] ✅ Успешно сохранен в кеш: ${inventoryHash}`);
+
+            // Update free tier limit counter
+            if (user) {
+                const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+                if (profile && !(profile.subscription_tier === 'pro' && profile.subscription_active)) {
+                    await supabase.from('profiles').update({
+                        daily_generations_count: (profile.daily_generations_count || 0) + 1
+                    }).eq('id', user.id);
+                }
+            }
+
+        } catch (dbErr) {
+            console.error("[Db] ❌ Ошибка сохранения в кеш или обновления лимита:", dbErr);
+        }
+        return finalResult;
+    }
+
+    return { success: false, error: "Неизвестная ошибка" };
 }
 
 // Helper to call Gemini REST API manually to support Proxy

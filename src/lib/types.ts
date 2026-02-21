@@ -95,6 +95,7 @@ export interface Recipe {
   // New fields
   instructions: string[]; // Step by step
   mealType: string[]; // e.g. ["Завтрак", "Обед"]
+  imageUrl?: string; // Unsplash Image
 }
 
 export interface ShoppingItem {

@@ -6,7 +6,8 @@ import { FridgePanel } from '@/components/FridgePanel';
 import { FamilyPanel } from '@/components/FamilyPanel';
 import { ChefPanel } from '@/components/ChefPanel';
 import { RecipeBasePanel } from '@/components/RecipeBasePanel';
-import { Package, Users, ChefHat, BookOpen, LogIn, LogOut, User, LayoutDashboard } from 'lucide-react';
+import { ShoppingListPanel } from '@/components/ShoppingListPanel';
+import { Package, Users, ChefHat, BookOpen, LogIn, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
 import { useUser } from '@/lib/hooks/useUser';
 import { useSupabaseSync } from '@/lib/hooks/useSupabaseSync';
 import Link from 'next/link';
@@ -15,7 +16,7 @@ import Link from 'next/link';
 export const maxDuration = 60;
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'fridge' | 'family' | 'chef' | 'recipes'>('chef');
+  const [activeTab, setActiveTab] = useState<'fridge' | 'family' | 'chef' | 'recipes' | 'shopping'>('chef');
   const { user, loading: authLoading, signOut } = useUser();
 
   // Данные: Supabase (авторизован) или localStorage (гость)
@@ -77,6 +78,14 @@ export default function Home() {
             <BookOpen size={24} />
             <span className="text-[10px] font-medium mt-1">Рецепты</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('shopping')}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'shopping' ? 'text-orange-600 bg-orange-50' : 'text-gray-400'}`}
+          >
+            <ShoppingCart size={24} />
+            <span className="text-[10px] font-medium mt-1">Покупки</span>
+          </button>
         </div>
         {/* Auth indicator (mobile) */}
         {user ? (
@@ -130,6 +139,12 @@ export default function Home() {
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${activeTab === 'recipes' ? 'bg-purple-50 text-purple-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
             >
               <BookOpen size={20} /> Книга рецептов <span className="ml-auto bg-gray-100 text-gray-400 text-xs px-2 py-0.5 rounded-full">{savedRecipes.length}</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('shopping')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium ${activeTab === 'shopping' ? 'bg-orange-50 text-orange-600 shadow-sm' : 'text-gray-500 hover:bg-gray-50'}`}
+            >
+              <ShoppingCart size={20} /> Список покупок
             </button>
           </nav>
 
@@ -201,6 +216,9 @@ export default function Home() {
                 savedRecipes={savedRecipes}
                 onRemoveRecipe={removeRecipe}
               />
+            )}
+            {activeTab === 'shopping' && (
+              <ShoppingListPanel />
             )}
           </div>
         </main>

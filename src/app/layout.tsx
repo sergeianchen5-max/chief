@@ -14,6 +14,8 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
+import CookieBanner from "@/components/CookieBanner";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -23,6 +25,7 @@ export default function RootLayout({
     <html lang="ru">
       <body className={`${montserrat.variable} font-sans antialiased bg-stone-50 text-stone-900`}>
         {children}
+        <CookieBanner />
       </body>
     </html>
   );
