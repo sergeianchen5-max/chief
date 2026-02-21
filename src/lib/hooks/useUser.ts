@@ -15,10 +15,11 @@ export function useUser() {
 
         const getUser = async () => {
             try {
-                console.log('[useUser] Запрос пользователя...');
-                const { data: { user }, error: authError } = await supabase.auth.getUser();
+                console.log('[useUser] Запрос сессии пользователя...');
+                const { data: { session }, error: authError } = await supabase.auth.getSession();
                 if (authError) throw authError;
 
+                const user = session?.user ?? null;
                 if (isMounted) setUser(user);
 
                 if (user) {
