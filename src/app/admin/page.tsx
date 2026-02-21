@@ -13,23 +13,30 @@ export default function AdminPage() {
     const [error, setError] = useState<string | null>(null);
 
     const checkAndLoad = async () => {
-        setLoading(true);
-        const res = await getPendingRecipes();
-        if (res.success && res.data) {
-            setRecipes(res.data);
-            setError(null);
-        } else {
-            setError(res.error || 'Failed to load');
+        try {
+            setLoading(true);
+            const res = await getPendingRecipes();
+            if (res.success && res.data) {
+                setRecipes(res.data);
+                setError(null);
+            } else {
+                setError(res.error || 'Failed to load');
+            }
+        } catch (err: any) {
+            setError(err.message || 'Unknown error');
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     useEffect(() => {
-        if (!authLoading && user) {
+        if (authLoading) return; // Ждем окончания проверки авторизации
+
+        if (user) {
             checkAndLoad();
-        } else if (!authLoading && !user) {
+        } else {
             setError('Требуется авторизация');
-            setLoading(false);
+            setLoading(false); // Важно: снимаем лоадер, если пользователя нет
         }
     }, [user, authLoading]);
 

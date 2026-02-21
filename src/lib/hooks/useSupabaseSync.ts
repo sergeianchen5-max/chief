@@ -23,88 +23,91 @@ function useDebouncedCallback(callback: (...args: any[]) => void, delay: number)
 export function useSupabaseSync() {
     const { user, loading: authLoading } = useUser();
 
-    const [inventory, setInventoryState] = useState<Ingredient[]>([]);
-    const [family, setFamilyState] = useState<FamilyMember[]>([]);
-    const [savedRecipes, setSavedRecipesState] = useState<Recipe[]>([]);
-    const [isLoaded, setIsLoaded] = useState(false);
+    const [inventory, setInventoryState] = useState<Ingredient[]>(() => {
+        if (typeof window !== 'undefined') {
+            const lsInv = localStorage.getItem(LS_KEYS.inventory);
+            return lsInv ? JSON.parse(lsInv) : [];
+        }
+        return [];
+    });
 
+    const [family, setFamilyState] = useState<FamilyMember[]>(() => {
+        if (typeof window !== 'undefined') {
+            const lsFam = localStorage.getItem(LS_KEYS.family);
+            return lsFam ? JSON.parse(lsFam) : [];
+        }
+        return [];
+    });
+
+    const [savedRecipes, setSavedRecipesState] = useState<Recipe[]>(() => {
+        if (typeof window !== 'undefined') {
+            const lsRec = localStorage.getItem(LS_KEYS.savedRecipes);
+            return lsRec ? JSON.parse(lsRec) : [];
+        }
+        return [];
+    });
+
+    const [isLoaded, setIsLoaded] = useState(false);
     const hasMigrated = useRef(false);
 
-    // ==================== ЗАГРУЗКА ====================
-
+    // Установка флага isLoaded для скрытия лоадера после монтирования компонента
     useEffect(() => {
-        if (authLoading) return;
+        setIsLoaded(true);
+    }, []);
 
-        const load = async () => {
-            if (user) {
-                // Авторизован → загружаем из Supabase
-                try {
-                    const data = await loadUserData(user.id);
+    // ==================== ЗАГРУЗКА ИЗ СУБД ====================
+    useEffect(() => {
+        if (authLoading || !user) return;
 
-                    // Если в Supabase пусто, мигрировать из localStorage
-                    if (!hasMigrated.current && data.inventory.length === 0 && data.family.length === 0 && data.savedRecipes.length === 0) {
-                        const lsInv = localStorage.getItem(LS_KEYS.inventory);
-                        const lsFam = localStorage.getItem(LS_KEYS.family);
-                        const lsRec = localStorage.getItem(LS_KEYS.savedRecipes);
+        let isMounted = true;
 
-                        const localInv = lsInv ? JSON.parse(lsInv) : [];
-                        const localFam = lsFam ? JSON.parse(lsFam) : [];
-                        const localRec = lsRec ? JSON.parse(lsRec) : [];
+        const loadDb = async () => {
+            try {
+                const data = await loadUserData(user.id);
 
-                        if (localInv.length > 0 || localFam.length > 0 || localRec.length > 0) {
-                            console.log('[Sync] 🔄 Миграция из localStorage в Supabase...');
+                if (!isMounted) return;
 
-                            if (localInv.length > 0) await saveInventory(user.id, localInv);
-                            if (localFam.length > 0) await saveFamily(user.id, localFam);
-                            for (const recipe of localRec) {
-                                await saveRecipeToDb(user.id, recipe);
-                            }
+                // Если в Supabase пусто, мигрировать из localStorage
+                if (!hasMigrated.current && data.inventory.length === 0 && data.family.length === 0 && data.savedRecipes.length === 0) {
+                    const localInv = inventory;
+                    const localFam = family;
+                    const localRec = savedRecipes;
 
-                            // Перезагрузить данные из Supabase
-                            const freshData = await loadUserData(user.id);
+                    if (localInv.length > 0 || localFam.length > 0 || localRec.length > 0) {
+                        console.log('[Sync] 🔄 Миграция из localStorage в Supabase...');
+                        if (localInv.length > 0) await saveInventory(user.id, localInv);
+                        if (localFam.length > 0) await saveFamily(user.id, localFam);
+                        for (const recipe of localRec) {
+                            await saveRecipeToDb(user.id, recipe);
+                        }
+
+                        // Перезагрузить данные из Supabase
+                        const freshData = await loadUserData(user.id);
+                        if (isMounted) {
                             setInventoryState(freshData.inventory);
                             setFamilyState(freshData.family);
                             setSavedRecipesState(freshData.savedRecipes);
                             hasMigrated.current = true;
-                            console.log('[Sync] ✅ Миграция завершена');
-                        } else {
-                            setInventoryState(data.inventory);
-                            setFamilyState(data.family);
-                            setSavedRecipesState(data.savedRecipes);
                         }
                     } else {
                         setInventoryState(data.inventory);
                         setFamilyState(data.family);
                         setSavedRecipesState(data.savedRecipes);
                     }
-                } catch (e) {
-                    console.error('[Sync] Ошибка загрузки данных:', e);
-                    // Fallback на localStorage
-                    loadFromLocalStorage();
+                } else {
+                    setInventoryState(data.inventory);
+                    setFamilyState(data.family);
+                    setSavedRecipesState(data.savedRecipes);
                 }
-            } else {
-                // Не авторизован → localStorage
-                loadFromLocalStorage();
+            } catch (e) {
+                console.error('[Sync] Ошибка загрузки данных из БД:', e);
             }
-            setIsLoaded(true);
         };
 
-        load();
+        loadDb();
+
+        return () => { isMounted = false; };
     }, [user, authLoading]);
-
-    function loadFromLocalStorage() {
-        try {
-            const lsInv = localStorage.getItem(LS_KEYS.inventory);
-            const lsFam = localStorage.getItem(LS_KEYS.family);
-            const lsRec = localStorage.getItem(LS_KEYS.savedRecipes);
-
-            if (lsInv) setInventoryState(JSON.parse(lsInv));
-            if (lsFam) setFamilyState(JSON.parse(lsFam));
-            if (lsRec) setSavedRecipesState(JSON.parse(lsRec));
-        } catch (e) {
-            console.error('[Sync] Ошибка чтения localStorage:', e);
-        }
-    }
 
     // ==================== СОХРАНЕНИЕ С DEBOUNCE ====================
 

@@ -37,8 +37,10 @@ export default function Home() {
     }
   };
 
-  // Не рендерить до загрузки
-  if (!isLoaded) return null;
+  // Не рендерить до загрузки, чтобы избежать ошибки гидратации
+  if (!isLoaded) {
+    return <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-20 md:pb-0" />;
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-20 md:pb-0">

@@ -15,34 +15,30 @@ export function useUser() {
 
         const getUser = async () => {
             try {
-                console.log('[useUser] Запрос сессии пользователя...');
-                const { data: { session }, error: authError } = await supabase.auth.getSession();
+                // Используем getUser для надежности (getSession может кэшироваться слишком агрессивно)
+                const { data: { user }, error: authError } = await supabase.auth.getUser();
                 if (authError) throw authError;
 
-                const user = session?.user ?? null;
                 if (isMounted) setUser(user);
 
                 if (user) {
-                    console.log(`[useUser] Запрос профиля для ${user.id}...`);
                     const { data: profile, error: profError } = await supabase
                         .from('profiles')
                         .select('*')
                         .eq('id', user.id)
                         .single();
+
                     if (profError && profError.code !== 'PGRST116') {
-                        console.error('[useUser] Ошибка профиля:', profError);
+                        console.error('[useUser] Ошибка загрузки профиля:', profError);
                     }
                     if (isMounted) setProfile(profile || null);
                 } else {
                     if (isMounted) setProfile(null);
                 }
-            } catch (err) {
-                console.error('[useUser] Критическая ошибка getUser:', err);
+            } catch (err: any) {
+                console.error('[useUser] Ошибка загрузки пользователя:', err);
             } finally {
-                if (isMounted) {
-                    console.log('[useUser] Загрузка завершена');
-                    setLoading(false);
-                }
+                if (isMounted) setLoading(false);
             }
         };
 
@@ -51,29 +47,26 @@ export function useUser() {
         // Подписка на изменения состояния Auth
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
-                try {
-                    console.log(`[useUser] onAuthStateChange event: ${_event}`);
-                    const currUser = session?.user ?? null;
-                    if (isMounted) setUser(currUser);
+                const currUser = session?.user ?? null;
+                if (!isMounted) return;
 
-                    if (currUser) {
-                        const { data: prof, error: profError } = await supabase
-                            .from('profiles')
-                            .select('*')
-                            .eq('id', currUser.id)
-                            .single();
-                        if (profError && profError.code !== 'PGRST116') {
-                            console.error('[useUser] Ошибка профиля (onAuthStateChange):', profError);
-                        }
-                        if (isMounted) setProfile(prof || null);
-                    } else {
-                        if (isMounted) setProfile(null);
+                setUser(currUser);
+
+                if (currUser) {
+                    const { data: prof, error: profError } = await supabase
+                        .from('profiles')
+                        .select('*')
+                        .eq('id', currUser.id)
+                        .single();
+                    if (profError && profError.code !== 'PGRST116') {
+                        console.error('[useUser] Ошибка профиля (AuthChange):', profError);
                     }
-                } catch (err) {
-                    console.error('[useUser] Ошибка onAuthStateChange:', err);
-                } finally {
-                    if (isMounted) setLoading(false);
+                    if (isMounted) setProfile(prof || null);
+                } else {
+                    if (isMounted) setProfile(null);
                 }
+
+                if (isMounted) setLoading(false);
             }
         );
 
