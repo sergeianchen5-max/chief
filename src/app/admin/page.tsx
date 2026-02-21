@@ -32,13 +32,14 @@ export default function AdminPage() {
     useEffect(() => {
         if (authLoading) return; // Ждем окончания проверки авторизации
 
-        if (user) {
+        if (user?.id) {
             checkAndLoad();
         } else {
             setError('Требуется авторизация');
             setLoading(false); // Важно: снимаем лоадер, если пользователя нет
         }
-    }, [user, authLoading]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, authLoading]);
 
     const handleAction = async (id: string, action: 'approve' | 'reject') => {
         const isPublic = action === 'approve';

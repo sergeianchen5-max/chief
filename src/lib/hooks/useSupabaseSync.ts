@@ -57,7 +57,7 @@ export function useSupabaseSync() {
 
     // ==================== ЗАГРУЗКА ИЗ СУБД ====================
     useEffect(() => {
-        if (authLoading || !user) return;
+        if (authLoading || !user?.id) return;
 
         let isMounted = true;
 
@@ -107,7 +107,8 @@ export function useSupabaseSync() {
         loadDb();
 
         return () => { isMounted = false; };
-    }, [user, authLoading]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, authLoading]);
 
     // ==================== СОХРАНЕНИЕ С DEBOUNCE ====================
 
