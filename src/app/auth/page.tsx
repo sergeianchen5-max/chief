@@ -112,8 +112,6 @@ export default function AuthPage() {
                         <div className="flex-1 h-px bg-stone-200"></div>
                     </div>
                     */}
-                    <span className="text-xs text-stone-400 font-medium">ИЛИ</span>
-                    <div className="flex-1 h-px bg-stone-200"></div>
                 </div>
 
                 {/* Email Magic Link */}
@@ -148,6 +146,10 @@ export default function AuthPage() {
                         )}
                         Отправить ссылку для входа
                     </button>
+
+                    <p className="text-center text-xs text-stone-400 pt-2">
+                        Входя, вы соглашаетесь с условиями использования
+                    </p>
                 </form>
 
                 {/* Сообщения */}
@@ -162,11 +164,6 @@ export default function AuthPage() {
                     </div>
                 )}
             </div>
-
-            {/* Подпись */}
-            <p className="text-center text-xs text-stone-400 mt-6">
-                Входя, вы соглашаетесь с условиями использования
-            </p>
         </div>
     );
 }

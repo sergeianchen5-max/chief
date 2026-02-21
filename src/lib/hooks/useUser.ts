@@ -36,7 +36,11 @@ export function useUser() {
                     if (isMounted) setProfile(null);
                 }
             } catch (err: any) {
-                console.error('[useUser] Ошибка загрузки пользователя:', err);
+                if (err.message && err.message.includes('Auth session missing')) {
+                    // Игнорируем штатную ошибку отсутствия сессии
+                } else {
+                    console.error('[useUser] Ошибка загрузки пользователя:', err);
+                }
             } finally {
                 if (isMounted) setLoading(false);
             }

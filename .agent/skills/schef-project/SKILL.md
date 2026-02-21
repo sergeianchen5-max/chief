@@ -124,3 +124,6 @@ CREATE INDEX idx_recipes_hash ON public.recipes (inventory_hash);
 - [ ] Переменные окружения заданы в Vercel.
 - [ ] Миграции БД применены в Supabase.
 - [ ] RLS политики активны.
+
+## 7. Деплой
+*   **Vercel:** или GIT
