@@ -56,8 +56,9 @@ export default function DashboardPage() {
                         .order('saved_at', { ascending: false });
 
                     if (fallbackData) {
-                        setSavedRecipes(fallbackData.map(r => ({
-                            ...r,
+                        setSavedRecipes(fallbackData.map((r: any) => ({
+                            recipe_id: r.recipe_id,
+                            saved_at: r.saved_at,
                             recipes: { id: r.recipe_id, title: 'Рецепт', content: {}, created_at: r.saved_at }
                         })) as any);
                     }

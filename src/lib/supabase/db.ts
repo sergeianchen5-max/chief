@@ -16,11 +16,12 @@ export async function loadUserData(userId: string): Promise<UserData> {
     const supabase = createClient()
 
     // Загрузить профиль (inventory + family)
-    const { data: profile, error: profileError } = await supabase
+    const { data, error: profileError } = await supabase
         .from('profiles')
         .select('inventory, family')
         .eq('id', userId)
         .single()
+    const profile = data as any;
 
     if (profileError) {
         console.error('[DB] Ошибка загрузки профиля:', profileError.message)
@@ -56,7 +57,7 @@ export async function loadUserData(userId: string): Promise<UserData> {
 export async function saveInventory(userId: string, inventory: Ingredient[]): Promise<void> {
     const supabase = createClient()
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('profiles')
         .update({ inventory, updated_at: new Date().toISOString() })
         .eq('id', userId)
@@ -71,7 +72,7 @@ export async function saveInventory(userId: string, inventory: Ingredient[]): Pr
 export async function saveFamily(userId: string, family: FamilyMember[]): Promise<void> {
     const supabase = createClient()
 
-    const { error } = await supabase
+    const { error } = await (supabase as any)
         .from('profiles')
         .update({ family, updated_at: new Date().toISOString() })
         .eq('id', userId)
@@ -96,7 +97,7 @@ export async function saveRecipeToDb(userId: string, recipe: Recipe): Promise<st
 
     // 1. Вставить рецепт в таблицу recipes
     const slug = generateSlug(recipe.name)
-    const { data: insertedRecipe, error: recipeError } = await supabase
+    const { data: insertedRecipe, error: recipeError } = await (supabase as any)
         .from('recipes')
         .insert({
             user_id: userId,
@@ -117,7 +118,7 @@ export async function saveRecipeToDb(userId: string, recipe: Recipe): Promise<st
     }
 
     // 2. Создать связь в saved_recipes
-    const { error: linkError } = await supabase
+    const { error: linkError } = await (supabase as any)
         .from('saved_recipes')
         .insert({
             user_id: userId,

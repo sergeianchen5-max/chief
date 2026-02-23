@@ -13,13 +13,9 @@ export interface UserProfile {
     daily_generations_count: number;
     daily_generations_reset_at: string | null;
     created_at: string;
-}
-
-// Singleton клиент
-let _supabase: ReturnType<typeof createClient> | null = null;
-function getSupabase() {
-    if (!_supabase) _supabase = createClient();
-    return _supabase;
+    inventory?: any;
+    family?: any;
+    preferences?: any;
 }
 
 export function useUser() {
@@ -29,7 +25,7 @@ export function useUser() {
 
     const loadProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
         try {
-            const supabase = getSupabase();
+            const supabase = createClient();
             const { data, error } = await supabase
                 .from('profiles')
                 .select('*')
@@ -38,7 +34,7 @@ export function useUser() {
             if (error && error.code !== 'PGRST116') {
                 console.error('[useUser] Ошибка профиля:', error);
             }
-            return (data as UserProfile) || null;
+            return data ? (data as unknown as UserProfile) : null;
         } catch (err) {
             console.error('[useUser] loadProfile error:', err);
             return null;
@@ -47,17 +43,13 @@ export function useUser() {
 
     useEffect(() => {
         let isMounted = true;
-        const supabase = getSupabase();
+        const supabase = createClient();
 
-        // ===== ОСНОВНОЙ МЕХАНИЗМ: onAuthStateChange =====
-        // Это синхронный listener, НЕ делает fetch, НЕ abort-ится.
-        // Supabase @supabase/ssr автоматически восстанавливает сессию из cookies
-        // и вызывает INITIAL_SESSION event.
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (event, session) => {
+        // Загрузка сессии из localStorage (supabase-js)
+        const initSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
                 if (!isMounted) return;
-
-                console.debug('[useUser] auth event:', event);
 
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
@@ -68,31 +60,42 @@ export function useUser() {
                 } else {
                     setProfile(null);
                 }
+            } catch (err: any) {
+                console.warn('[useUser] initSession error:', err.message);
+            } finally {
+                if (isMounted) setLoading(false);
+            }
+        };
 
-                // Снимаем loading после ЛЮБОГО auth event
+        initSession();
+
+        // Слушатель изменений auth
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (_event, session) => {
+                if (!isMounted) return;
+                console.debug('[useUser] auth event:', _event);
+
+                const currUser = session?.user ?? null;
+                setUser(currUser);
+
+                if (currUser) {
+                    const prof = await loadProfile(currUser.id);
+                    if (isMounted) setProfile(prof);
+                } else {
+                    if (isMounted) setProfile(null);
+                }
                 if (isMounted) setLoading(false);
             }
         );
 
-        // Fallback: если onAuthStateChange не вызвался за 3 секунды,
-        // снимаем loading (пользователь — гость)
-        const fallbackTimer = setTimeout(() => {
-            if (isMounted && loading) {
-                console.debug('[useUser] fallback: no auth event in 3s, setting guest');
-                setLoading(false);
-            }
-        }, 3000);
-
         return () => {
             isMounted = false;
             subscription.unsubscribe();
-            clearTimeout(fallbackTimer);
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [loadProfile]);
 
     const signOut = async () => {
-        const supabase = getSupabase();
+        const supabase = createClient();
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
