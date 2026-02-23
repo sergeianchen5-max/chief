@@ -27,6 +27,7 @@ export default function DashboardPage() {
     const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRow[]>([]);
     const [recipesLoading, setRecipesLoading] = useState(true);
     const [activeSection, setActiveSection] = useState<'recipes' | 'profile'>('recipes');
+    const [recipesError, setRecipesError] = useState<string | null>(null);
     const supabase = createClient();
 
     useEffect(() => {
@@ -38,6 +39,7 @@ export default function DashboardPage() {
 
         const loadRecipes = async () => {
             try {
+                // Пробуем с join на recipes
                 const { data: recipesData, error } = await supabase
                     .from('saved_recipes')
                     .select('recipe_id, saved_at, recipes(id, title, content, created_at)')
@@ -45,14 +47,27 @@ export default function DashboardPage() {
                     .order('saved_at', { ascending: false });
 
                 if (error) {
-                    console.error('[Dashboard] Ошибка загрузки рецептов:', error);
+                    console.error('[Dashboard] Ошибка загрузки рецептов (join):', error);
+                    // Fallback — загружаем без join
+                    const { data: fallbackData } = await supabase
+                        .from('saved_recipes')
+                        .select('recipe_id, saved_at')
+                        .eq('user_id', user.id)
+                        .order('saved_at', { ascending: false });
+
+                    if (fallbackData) {
+                        setSavedRecipes(fallbackData.map(r => ({
+                            ...r,
+                            recipes: { id: r.recipe_id, title: 'Рецепт', content: {}, created_at: r.saved_at }
+                        })) as any);
+                    }
                 } else if (recipesData) {
                     setSavedRecipes(recipesData as any);
                 }
             } catch (err) {
                 console.error('[Dashboard] Критическая ошибка loadRecipes:', err);
+                setRecipesError('Не удалось загрузить рецепты');
             } finally {
-                // Гарантированно снимаем loading — даже при ошибке
                 setRecipesLoading(false);
             }
         };
@@ -76,8 +91,9 @@ export default function DashboardPage() {
     // ============= ЗАГРУЗКА =============
     if (authLoading || (user && recipesLoading)) {
         return (
-            <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+            <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center gap-3">
                 <Loader2 className="animate-spin text-orange-500" size={40} />
+                <p className="text-stone-400 text-sm">Загружаем ваши данные...</p>
             </div>
         );
     }
