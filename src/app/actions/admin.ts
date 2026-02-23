@@ -51,8 +51,27 @@ export async function updateRecipeStatus(id: string, status: 'approved' | 'rejec
             .eq('id', id);
 
         if (error) throw error;
+
+        // ✅ При одобрении — автоматически публикуем в WordPress
+        let wpResult: { success: boolean; wpUrl?: string; error?: string } | null = null;
+        if (status === 'approved' && isPublic) {
+            try {
+                const { publishToWordPress } = await import('./wordpress');
+                wpResult = await publishToWordPress(id);
+                console.log(`[Admin] WP публикация для ${id}:`, wpResult);
+            } catch (wpErr: any) {
+                console.error('[Admin] Ошибка WP модуля:', wpErr.message);
+                wpResult = { success: false, error: wpErr.message };
+            }
+        }
+
         revalidatePath('/admin');
-        return { success: true };
+        return {
+            success: true,
+            wpPublished: wpResult?.success || false,
+            wpUrl: wpResult?.wpUrl,
+            wpError: wpResult?.error
+        };
     } catch (e: any) {
         return { success: false, error: e.message };
     }

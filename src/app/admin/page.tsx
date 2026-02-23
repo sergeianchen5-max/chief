@@ -42,8 +42,18 @@ export default function AdminPage() {
         const res = await updateRecipeStatus(id, status, isPublic);
         if (res.success) {
             setRecipes(prev => prev.map(r =>
-                r.id === id ? { ...r, moderation_status: status, is_public: isPublic } : r
+                r.id === id ? { ...r, moderation_status: status, is_public: isPublic, wp_url: (res as any).wpUrl } : r
             ));
+
+            // Показываем результат WP публикации
+            if (action === 'approve') {
+                const wpRes = res as any;
+                if (wpRes.wpPublished) {
+                    alert(`✅ Рецепт одобрен и опубликован в WordPress!\n${wpRes.wpUrl || ''}`);
+                } else if (wpRes.wpError) {
+                    alert(`✅ Рецепт одобрен.\n⚠️ WP: ${wpRes.wpError}`);
+                }
+            }
         } else {
             alert('Ошибка: ' + res.error);
         }
@@ -181,8 +191,8 @@ export default function AdminPage() {
                                     <li key={recipe.id} className="p-4 text-sm flex justify-between items-center opacity-70">
                                         <span>{recipe.title}</span>
                                         <span className={`px-2 py-1 rounded text-xs font-semibold ${recipe.moderation_status === 'approved'
-                                                ? 'bg-green-100 text-green-700'
-                                                : 'bg-red-100 text-red-700'
+                                            ? 'bg-green-100 text-green-700'
+                                            : 'bg-red-100 text-red-700'
                                             }`}>
                                             {recipe.moderation_status === 'approved' ? 'Опубликован' : 'Отклонён'}
                                         </span>
