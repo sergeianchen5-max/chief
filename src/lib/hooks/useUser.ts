@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
@@ -16,74 +16,91 @@ export interface UserProfile {
     created_at: string;
 }
 
+// Singleton клиент — один на всё приложение
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabase() {
+    if (!_supabase) _supabase = createClient();
+    return _supabase;
+}
+
 export function useUser() {
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
-    // Используем useRef чтобы createClient вызывался только один раз
-    const supabaseRef = useRef(createClient());
-    const supabase = supabaseRef.current;
+
+    const loadProfile = useCallback(async (userId: string): Promise<UserProfile | null> => {
+        try {
+            const supabase = getSupabase();
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            if (error && error.code !== 'PGRST116') {
+                console.error('[useUser] Ошибка загрузки профиля:', error);
+            }
+            return (data as UserProfile) || null;
+        } catch (err) {
+            console.error('[useUser] Критическая ошибка loadProfile:', err);
+            return null;
+        }
+    }, []);
 
     useEffect(() => {
         let isMounted = true;
+        const supabase = getSupabase();
 
-        const loadProfile = async (userId: string): Promise<UserProfile | null> => {
+        const fetchUser = async (retryCount = 0) => {
             try {
-                const { data, error } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .eq('id', userId)
-                    .single();
+                const { data: { session }, error } = await supabase.auth.getSession();
 
-                if (error && error.code !== 'PGRST116') {
-                    console.error('[useUser] Ошибка загрузки профиля:', error);
+                if (error) {
+                    // Если AbortError и ещё есть попытки — retry через 100ms
+                    if (error.name === 'AbortError' && retryCount < 3) {
+                        console.debug(`[useUser] getSession aborted, retry ${retryCount + 1}/3`);
+                        setTimeout(() => { if (isMounted) fetchUser(retryCount + 1); }, 100);
+                        return;
+                    }
+                    if (!error.message?.includes('Auth session missing')) {
+                        console.warn('[useUser] getSession error:', error.message);
+                    }
                 }
-                return (data as UserProfile) || null;
-            } catch (err) {
-                console.error('[useUser] Критическая ошибка loadProfile:', err);
-                return null;
-            }
-        };
-
-        const getUser = async () => {
-            try {
-                // Сначала пробуем getSession — он не делает сетевой запрос
-                // и не подвержен AbortError в React Strict Mode
-                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-                if (sessionError) {
-                    console.warn('[useUser] getSession error:', sessionError.message);
-                }
-
-                const currentUser = session?.user ?? null;
 
                 if (!isMounted) return;
+
+                const currentUser = session?.user ?? null;
                 setUser(currentUser);
 
                 if (currentUser) {
                     const prof = await loadProfile(currentUser.id);
                     if (isMounted) setProfile(prof);
                 } else {
-                    if (isMounted) setProfile(null);
+                    setProfile(null);
                 }
             } catch (err: any) {
-                // Игнорируем AbortError (React Strict Mode) и отсутствие сессии
-                if (err.name === 'AbortError' || err.message?.includes('Auth session missing')) {
-                    console.debug('[useUser] Ignored:', err.name || err.message);
-                } else {
-                    console.error('[useUser] Ошибка загрузки пользователя:', err);
+                // Retry на AbortError
+                if (err.name === 'AbortError' && retryCount < 3) {
+                    console.debug(`[useUser] catch AbortError, retry ${retryCount + 1}/3`);
+                    setTimeout(() => { if (isMounted) fetchUser(retryCount + 1); }, 100);
+                    return;
+                }
+                if (!err.message?.includes('Auth session missing') && err.name !== 'AbortError') {
+                    console.error('[useUser] Ошибка:', err);
                 }
             } finally {
+                // Снимаем loading только если не было retry
                 if (isMounted) setLoading(false);
             }
         };
 
-        getUser();
+        fetchUser();
 
-        // Подписка на изменения состояния Auth
+        // Подписка на изменения auth — это основной механизм обнаружения логина
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
                 if (!isMounted) return;
+                console.debug('[useUser] Auth state change:', _event);
 
                 const currUser = session?.user ?? null;
                 setUser(currUser);
@@ -97,7 +114,7 @@ export function useUser() {
                     }
                 } catch (err: any) {
                     if (err.name !== 'AbortError') {
-                        console.error('[useUser] Ошибка в onAuthStateChange:', err);
+                        console.error('[useUser] onAuthStateChange error:', err);
                     }
                 } finally {
                     if (isMounted) setLoading(false);
@@ -109,10 +126,10 @@ export function useUser() {
             isMounted = false;
             subscription.unsubscribe();
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [loadProfile]);
 
     const signOut = async () => {
+        const supabase = getSupabase();
         await supabase.auth.signOut();
         setUser(null);
         setProfile(null);
