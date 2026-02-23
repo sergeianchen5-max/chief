@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai"; // Only for types if needed
 import { ChefPlan, FamilyMember, Ingredient, MealCategory } from "@/lib/types";
 import { generateChefPlan as generateChefPlanServerAction } from "@/app/actions/generate";
 

@@ -1,5 +1,6 @@
 import { createClient } from '@/lib/supabase/client'
 import type { Ingredient, FamilyMember, Recipe } from '@/lib/types'
+import { hashIngredients } from '@/lib/hash'
 
 // ===================== ТИПЫ =====================
 
@@ -102,7 +103,7 @@ export async function saveRecipeToDb(userId: string, recipe: Recipe): Promise<st
             title: recipe.name,
             slug,
             ingredients_input: recipe.ingredientsToUse || [],
-            inventory_hash: slug, // используем slug как хеш для простоты
+            inventory_hash: hashIngredients(recipe.ingredientsToUse || []),
             content: recipe as any, // весь рецепт как JSONB
             is_public: false,
             moderation_status: 'pending',

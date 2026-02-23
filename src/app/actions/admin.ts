@@ -19,7 +19,7 @@ async function checkAdmin() {
 
     const adminEmails = getAdminEmails();
     if (!adminEmails.includes(user.email)) {
-        throw new Error(`Unauthorized: Email ${user.email} не является администратором. Доступные: ${adminEmails.join(', ')}`);
+        throw new Error("Доступ запрещён: ваш email не является администратором");
     }
     return supabase;
 }

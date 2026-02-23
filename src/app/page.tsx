@@ -15,8 +15,6 @@ import Link from 'next/link';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
 import { addItemsToShoppingList } from '@/app/actions/shopping';
 
-// Allow 60 seconds for AI generation
-export const maxDuration = 60;
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'fridge' | 'family' | 'chef' | 'recipes' | 'shopping'>('chef');
@@ -33,7 +31,6 @@ export default function Home() {
   // ✅ Состояние генерации поднято сюда, чтобы не сбрасывалось при смене вкладок
   const [chefPlan, setChefPlan] = useState<ChefPlan | null>(null);
   const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
-  // ✅ Исправлен набор категорий — 'soup' не существует в MealCategory, используем 'salad'
   const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'salad', 'main', 'dessert']);
   const [errorMessage, setErrorMessage] = useState('');
 

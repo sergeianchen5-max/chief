@@ -53,7 +53,7 @@ export type Category = 'produce' | 'dairy' | 'meat' | 'pantry' | 'frozen' | 'oth
 export interface Ingredient {
   id: string;
   name: string;
-  category: Category;
+  category?: Category;
 }
 
 export interface NutritionCoverage {
