@@ -45,31 +45,9 @@ export function useUser() {
         let isMounted = true;
         const supabase = createClient();
 
-        // Загрузка сессии из localStorage (supabase-js)
-        const initSession = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (!isMounted) return;
-
-                const currentUser = session?.user ?? null;
-                setUser(currentUser);
-
-                if (currentUser) {
-                    const prof = await loadProfile(currentUser.id);
-                    if (isMounted) setProfile(prof);
-                } else {
-                    setProfile(null);
-                }
-            } catch (err: any) {
-                console.warn('[useUser] initSession error:', err.message);
-            } finally {
-                if (isMounted) setLoading(false);
-            }
-        };
-
-        initSession();
-
-        // Слушатель изменений auth
+        // Слушатель изменений auth.
+        // ЭТОТ код синхронный (Listener). supabase.js восстанавливает 
+        // сессию из localStorage сам и вызывает INITIAL_SESSION.
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
                 if (!isMounted) return;
@@ -84,15 +62,26 @@ export function useUser() {
                 } else {
                     if (isMounted) setProfile(null);
                 }
+
                 if (isMounted) setLoading(false);
             }
         );
 
+        // Fallback: если onAuthStateChange не сработал за 3 секунды (иногда бывает для гостей),
+        // снимаем состояние загрузки
+        const fallbackTimer = setTimeout(() => {
+            if (isMounted && loading) {
+                console.debug('[useUser] fallback fallbackTimer: no auth event in 3s');
+                setLoading(false);
+            }
+        }, 3000);
+
         return () => {
             isMounted = false;
+            clearTimeout(fallbackTimer);
             subscription.unsubscribe();
         };
-    }, [loadProfile]);
+    }, [loadProfile, loading]);
 
     const signOut = async () => {
         const supabase = createClient();
