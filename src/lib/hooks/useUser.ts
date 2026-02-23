@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-// Строгий тип профиля — соответствует таблице profiles в Supabase
 export interface UserProfile {
     id: string;
     email: string | null;
@@ -16,7 +15,7 @@ export interface UserProfile {
     created_at: string;
 }
 
-// Singleton клиент — один на всё приложение
+// Singleton клиент
 let _supabase: ReturnType<typeof createClient> | null = null;
 function getSupabase() {
     if (!_supabase) _supabase = createClient();
@@ -36,13 +35,12 @@ export function useUser() {
                 .select('*')
                 .eq('id', userId)
                 .single();
-
             if (error && error.code !== 'PGRST116') {
-                console.error('[useUser] Ошибка загрузки профиля:', error);
+                console.error('[useUser] Ошибка профиля:', error);
             }
             return (data as UserProfile) || null;
         } catch (err) {
-            console.error('[useUser] Критическая ошибка loadProfile:', err);
+            console.error('[useUser] loadProfile error:', err);
             return null;
         }
     }, []);
@@ -51,23 +49,15 @@ export function useUser() {
         let isMounted = true;
         const supabase = getSupabase();
 
-        const fetchUser = async (retryCount = 0) => {
-            try {
-                const { data: { session }, error } = await supabase.auth.getSession();
-
-                if (error) {
-                    // Если AbortError и ещё есть попытки — retry через 100ms
-                    if (error.name === 'AbortError' && retryCount < 3) {
-                        console.debug(`[useUser] getSession aborted, retry ${retryCount + 1}/3`);
-                        setTimeout(() => { if (isMounted) fetchUser(retryCount + 1); }, 100);
-                        return;
-                    }
-                    if (!error.message?.includes('Auth session missing')) {
-                        console.warn('[useUser] getSession error:', error.message);
-                    }
-                }
-
+        // ===== ОСНОВНОЙ МЕХАНИЗМ: onAuthStateChange =====
+        // Это синхронный listener, НЕ делает fetch, НЕ abort-ится.
+        // Supabase @supabase/ssr автоматически восстанавливает сессию из cookies
+        // и вызывает INITIAL_SESSION event.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (event, session) => {
                 if (!isMounted) return;
+
+                console.debug('[useUser] auth event:', event);
 
                 const currentUser = session?.user ?? null;
                 setUser(currentUser);
@@ -78,55 +68,28 @@ export function useUser() {
                 } else {
                     setProfile(null);
                 }
-            } catch (err: any) {
-                // Retry на AbortError
-                if (err.name === 'AbortError' && retryCount < 3) {
-                    console.debug(`[useUser] catch AbortError, retry ${retryCount + 1}/3`);
-                    setTimeout(() => { if (isMounted) fetchUser(retryCount + 1); }, 100);
-                    return;
-                }
-                if (!err.message?.includes('Auth session missing') && err.name !== 'AbortError') {
-                    console.error('[useUser] Ошибка:', err);
-                }
-            } finally {
-                // Снимаем loading только если не было retry
+
+                // Снимаем loading после ЛЮБОГО auth event
                 if (isMounted) setLoading(false);
             }
-        };
-
-        fetchUser();
-
-        // Подписка на изменения auth — это основной механизм обнаружения логина
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            async (_event, session) => {
-                if (!isMounted) return;
-                console.debug('[useUser] Auth state change:', _event);
-
-                const currUser = session?.user ?? null;
-                setUser(currUser);
-
-                try {
-                    if (currUser) {
-                        const prof = await loadProfile(currUser.id);
-                        if (isMounted) setProfile(prof);
-                    } else {
-                        if (isMounted) setProfile(null);
-                    }
-                } catch (err: any) {
-                    if (err.name !== 'AbortError') {
-                        console.error('[useUser] onAuthStateChange error:', err);
-                    }
-                } finally {
-                    if (isMounted) setLoading(false);
-                }
-            }
         );
+
+        // Fallback: если onAuthStateChange не вызвался за 3 секунды,
+        // снимаем loading (пользователь — гость)
+        const fallbackTimer = setTimeout(() => {
+            if (isMounted && loading) {
+                console.debug('[useUser] fallback: no auth event in 3s, setting guest');
+                setLoading(false);
+            }
+        }, 3000);
 
         return () => {
             isMounted = false;
             subscription.unsubscribe();
+            clearTimeout(fallbackTimer);
         };
-    }, [loadProfile]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     const signOut = async () => {
         const supabase = getSupabase();
