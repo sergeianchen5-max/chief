@@ -12,7 +12,7 @@ import { Package, Users, ChefHat, BookOpen, LogIn, LogOut, LayoutDashboard, Shop
 import { useUser } from '@/lib/hooks/useUser';
 import { useSupabaseSync } from '@/lib/hooks/useSupabaseSync';
 import Link from 'next/link';
-import Image from 'next/image';
+import PWAInstallBanner from '@/components/PWAInstallBanner';
 
 // Allow 60 seconds for AI generation
 export const maxDuration = 60;
@@ -32,7 +32,8 @@ export default function Home() {
   // ✅ Состояние генерации поднято сюда, чтобы не сбрасывалось при смене вкладок
   const [chefPlan, setChefPlan] = useState<ChefPlan | null>(null);
   const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
-  const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'soup', 'main', 'dessert']);
+  // ✅ Исправлен набор категорий — 'soup' не существует в MealCategory, используем 'salad'
+  const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'salad', 'main', 'dessert']);
   const [errorMessage, setErrorMessage] = useState('');
 
   const saveRecipe = async (recipe: Recipe) => {
@@ -52,9 +53,19 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-20 md:pb-0">
+      <PWAInstallBanner />
 
       {/* Mobile Navigation (Bottom) */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 md:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        {/* Строка авторизации сверху навбара */}
+        {!user && (
+          <div className="border-b border-gray-100 px-4 py-1.5 flex items-center justify-between bg-orange-50">
+            <span className="text-xs text-gray-500">Войдите, чтобы сохранять рецепты</span>
+            <Link href="/auth" className="text-xs font-bold text-orange-600 hover:text-orange-700">
+              Войти →
+            </Link>
+          </div>
+        )}
         <div className="flex justify-around items-center px-1 pt-2 pb-1">
           <button
             onClick={() => setActiveTab('fridge')}
@@ -98,25 +109,17 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Auth indicator (mobile) — улучшенный */}
-        <div className="absolute top-2 right-2">
-          {user ? (
+        {/* Auth indicator (mobile) — только аватар если залогинен */}
+        {user && (
+          <div className="absolute top-2 right-2">
             <Link href="/dashboard"
               className="w-8 h-8 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-md"
               title="Личный кабинет"
             >
               {user.email?.charAt(0).toUpperCase() || '?'}
             </Link>
-          ) : (
-            <Link href="/auth"
-              className="flex items-center gap-1 bg-orange-500 text-white rounded-full px-3 py-1.5 text-[11px] font-bold shadow-md hover:bg-orange-600 transition-colors"
-              title="Войти"
-            >
-              <LogIn size={12} />
-              Войти
-            </Link>
-          )}
-        </div>
+          </div>
+        )}
       </nav>
 
       {/* Desktop Layout Container */}
@@ -256,25 +259,13 @@ export default function Home() {
               <RecipeBasePanel
                 savedRecipes={savedRecipes}
                 onRemoveRecipe={removeRecipe}
+                user={user}
               />
             )}
             {activeTab === 'shopping' && (
               <ShoppingListPanel user={user} />
             )}
           </div>
-
-          {/* ✅ PRO-баннер для мобильных (появляется снизу на ChefPanel) */}
-          {activeTab === 'chef' && !user && (
-            <div className="md:hidden absolute bottom-0 left-0 right-0 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <Crown size={16} />
-                <span className="font-bold">Шеф PRO — безлимитно</span>
-              </div>
-              <Link href="/pricing" className="bg-white text-orange-600 font-bold px-3 py-1 rounded-full text-xs">
-                Узнать
-              </Link>
-            </div>
-          )}
         </main>
       </div>
     </div>

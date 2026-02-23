@@ -4,13 +4,16 @@ import React, { useState } from 'react';
 import { Recipe } from '@/lib/types';
 import { BookOpen, Clock, Scale, Trash2, ChevronDown, ChevronUp, Utensils, Share2, ShoppingCart, Check } from 'lucide-react';
 import { addItemsToShoppingList } from '@/app/actions/shopping';
+import type { User } from '@supabase/supabase-js';
 
 interface RecipeBasePanelProps {
     savedRecipes: Recipe[];
     onRemoveRecipe: (id: string) => void;
+    user?: User | null;
 }
 
-export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, onRemoveRecipe }) => {
+
+export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, onRemoveRecipe, user }) => {
     const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
     const [addingToList, setAddingToList] = useState<string | null>(null);
     const [addedToList, setAddedToList] = useState<string | null>(null);
@@ -37,23 +40,28 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
     };
 
     const handleAddShopping = async (recipe: Recipe) => {
-        if (!recipe.id || recipe.missingIngredients.length === 0) return;
-        setAddingToList(recipe.id);
+        if (!recipe.missingIngredients || recipe.missingIngredients.length === 0) return;
+        const key = recipe.id || recipe.name;
+        setAddingToList(key);
 
         const items = recipe.missingIngredients.map(name => ({
             name,
             quantity: '',
-            reason: ''
+            reason: `для рецепта «${recipe.name}»`
         }));
 
-        const res = await addItemsToShoppingList(recipe.id, items);
+        // Передаём имя рецепта как context, recipe.id — опциональный UUID
+        const res = await addItemsToShoppingList(recipe.name, items, recipe.id ?? null);
 
         setAddingToList(null);
         if (res.success) {
-            setAddedToList(recipe.id);
+            setAddedToList(key);
             setTimeout(() => setAddedToList(null), 3000);
+        } else if (res.error?.includes('Войдите')) {
+            // Показываем подсказку вместо скучного alert
+            alert('🔐 Войдите в аккаунт, чтобы сохранять списки покупок');
         } else {
-            alert('Ошибка добавления: ' + res.error);
+            console.error('Ошибка добавления в покупки:', res.error);
         }
     };
 
@@ -120,12 +128,15 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
                                     <div className="mb-3">
                                         <button
                                             onClick={() => handleAddShopping(recipe)}
-                                            disabled={addingToList === recipeId || addedToList === recipeId}
-                                            className={`w-full flex justify-center items-center gap-2 py-2 rounded-lg text-sm font-semibold transition-colors ${addedToList === recipeId ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
+                                            disabled={addingToList === (recipe.id || recipe.name) || addedToList === (recipe.id || recipe.name)}
+                                            className={`w-full flex justify-center items-center gap-2 py-2 rounded-lg text-sm font-semibold transition-colors ${addedToList === (recipe.id || recipe.name)
+                                                    ? 'bg-green-100 text-green-700'
+                                                    : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                                                }`}
                                         >
-                                            {addingToList === recipeId ? (
+                                            {addingToList === (recipe.id || recipe.name) ? (
                                                 <span className="animate-pulse">Добавляем...</span>
-                                            ) : addedToList === recipeId ? (
+                                            ) : addedToList === (recipe.id || recipe.name) ? (
                                                 <><Check size={16} /> В списке покупок</>
                                             ) : (
                                                 <><ShoppingCart size={16} /> Купить недостающее ({recipe.missingIngredients.length})</>
@@ -133,6 +144,7 @@ export const RecipeBasePanel: React.FC<RecipeBasePanelProps> = ({ savedRecipes, 
                                         </button>
                                     </div>
                                 )}
+
 
                                 <div className="flex gap-4 mb-3 text-sm text-gray-600">
                                     <span className="flex items-center gap-1"><Clock size={14} /> {recipe.cookingTimeMinutes} мин</span>

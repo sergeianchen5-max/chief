@@ -3,24 +3,53 @@
 import { createClient } from '@/lib/supabase/server';
 import { ShoppingItem } from '@/lib/types';
 
-export async function addItemsToShoppingList(recipeId: string, items: ShoppingItem[]) {
+// Вспомогательная функция для проверки UUID
+function isValidUUID(str: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+export async function addItemsToShoppingList(
+    recipeName: string,
+    items: ShoppingItem[],
+    recipeId?: string | null
+) {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
-        return { success: false, error: "Unauthorized" };
+        return { success: false, error: 'Войдите в аккаунт, чтобы добавлять в список покупок' };
     }
 
+    // Используем recipe_id только если это валидный UUID, иначе null
+    const validRecipeId = recipeId && isValidUUID(recipeId) ? recipeId : null;
+
     try {
-        const { data, error } = await supabase
+        const { error } = await supabase
             .from('shopping_lists')
             .insert({
                 user_id: user.id,
-                recipe_id: recipeId,
-                items: items as any
+                recipe_id: validRecipeId,
+                // Сохраняем имя рецепта в items для отображения
+                items: items as any,
+                ...(recipeName ? { recipe_title: recipeName } : {})
             });
 
-        if (error) throw error;
+        if (error) {
+            // Если поле recipe_title не существует — пробуем без него
+            if (error.message.includes('recipe_title')) {
+                const { error: error2 } = await supabase
+                    .from('shopping_lists')
+                    .insert({
+                        user_id: user.id,
+                        recipe_id: validRecipeId,
+                        items: items as any,
+                    });
+                if (error2) throw error2;
+            } else {
+                throw error;
+            }
+        }
+
         return { success: true };
     } catch (e: any) {
         console.error("Failed to add to shopping list:", e);
