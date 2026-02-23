@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
@@ -20,7 +20,9 @@ export function useUser() {
     const [user, setUser] = useState<User | null>(null);
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
-    const supabase = createClient();
+    // Используем useRef чтобы createClient вызывался только один раз
+    const supabaseRef = useRef(createClient());
+    const supabase = supabaseRef.current;
 
     useEffect(() => {
         let isMounted = true;
@@ -45,24 +47,33 @@ export function useUser() {
 
         const getUser = async () => {
             try {
-                const { data: { user }, error: authError } = await supabase.auth.getUser();
-                if (authError) throw authError;
+                // Сначала пробуем getSession — он не делает сетевой запрос
+                // и не подвержен AbortError в React Strict Mode
+                const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+                if (sessionError) {
+                    console.warn('[useUser] getSession error:', sessionError.message);
+                }
+
+                const currentUser = session?.user ?? null;
 
                 if (!isMounted) return;
-                setUser(user);
+                setUser(currentUser);
 
-                if (user) {
-                    const prof = await loadProfile(user.id);
+                if (currentUser) {
+                    const prof = await loadProfile(currentUser.id);
                     if (isMounted) setProfile(prof);
                 } else {
                     if (isMounted) setProfile(null);
                 }
             } catch (err: any) {
-                if (!err.message?.includes('Auth session missing')) {
+                // Игнорируем AbortError (React Strict Mode) и отсутствие сессии
+                if (err.name === 'AbortError' || err.message?.includes('Auth session missing')) {
+                    console.debug('[useUser] Ignored:', err.name || err.message);
+                } else {
                     console.error('[useUser] Ошибка загрузки пользователя:', err);
                 }
             } finally {
-                // Гарантированно снимаем loading — даже если профиль не загрузился
                 if (isMounted) setLoading(false);
             }
         };
@@ -77,7 +88,6 @@ export function useUser() {
                 const currUser = session?.user ?? null;
                 setUser(currUser);
 
-                // Оборачиваем в try-catch чтобы setLoading(false) вызвался ВСЕГДА
                 try {
                     if (currUser) {
                         const prof = await loadProfile(currUser.id);
@@ -85,8 +95,10 @@ export function useUser() {
                     } else {
                         if (isMounted) setProfile(null);
                     }
-                } catch (err) {
-                    console.error('[useUser] Ошибка в onAuthStateChange:', err);
+                } catch (err: any) {
+                    if (err.name !== 'AbortError') {
+                        console.error('[useUser] Ошибка в onAuthStateChange:', err);
+                    }
                 } finally {
                     if (isMounted) setLoading(false);
                 }
