@@ -10,6 +10,7 @@ interface ChefPanelProps {
     family: FamilyMember[];
     onSaveRecipe: (recipe: Recipe) => void;
     savedRecipeIds: string[];
+    savedRecipeNames: string[];
     // ✅ Поднятое состояние из page.tsx (сохраняется при смене вкладок)
     plan: ChefPlan | null;
     setPlan: (plan: ChefPlan | null) => void;
@@ -22,7 +23,7 @@ interface ChefPanelProps {
 }
 
 export const ChefPanel: React.FC<ChefPanelProps> = ({
-    inventory, family, onSaveRecipe, savedRecipeIds,
+    inventory, family, onSaveRecipe, savedRecipeIds, savedRecipeNames,
     plan, setPlan, generationState, setGenerationState,
     selectedCategories, setSelectedCategories, errorMessage, setErrorMessage
 }) => {
@@ -323,37 +324,44 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({
                             {plan.recipes.map((recipe, index) => {
                                 const recipeId = recipe.id || index.toString();
                                 const isExpanded = expandedRecipe === recipeId;
-                                // ✅ isSaved проверяется по id рецепта
-                                const isSaved = savedRecipeIds.includes(recipeId);
+                                // ✅ isSaved проверяется по имени рецепта (UUID из БД не совпадает с временным id)
+                                const isSaved = savedRecipeNames.includes(recipe.name) || savedRecipeIds.includes(recipeId);
 
                                 return (
-                                    <div key={recipeId} className="border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow bg-white overflow-hidden recipe-card-print">
+                                    <div key={recipeId} className={`border rounded-2xl shadow-sm hover:shadow-md transition-shadow overflow-hidden recipe-card-print ${isSaved ? 'border-orange-200 bg-orange-50/30' : 'border-gray-100 bg-white'}`}>
                                         {/* Card Header & Main Info */}
                                         <div className="p-4 sm:p-5">
                                             <div className="flex justify-between items-start mb-3 gap-2">
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex flex-wrap gap-1.5 mb-2">
-                                                        {recipe.mealType && recipe.mealType.map(tag => (
-                                                            <span key={tag} className="bg-orange-100 text-orange-700 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full tracking-wide">
-                                                                {tag}
-                                                            </span>
-                                                        ))}
-                                                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full tracking-wide border ${recipe.difficulty === 'Easy' ? 'border-green-200 text-green-600' :
-                                                            recipe.difficulty === 'Medium' ? 'border-yellow-200 text-yellow-600' : 'border-red-200 text-red-600'
-                                                            }`}>
-                                                            {recipe.difficulty}
-                                                        </span>
+                                                <div className="flex gap-3 flex-1 min-w-0">
+                                                    {/* ✅ Иконка рецепта — плейсхолдер Utensils */}
+                                                    <div className={`w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-xl flex items-center justify-center ${isSaved ? 'bg-orange-100 text-orange-400' : 'bg-gray-100 text-gray-300'}`}>
+                                                        <Utensils size={24} />
                                                     </div>
-                                                    <h3 className="text-base sm:text-xl font-bold text-gray-900 leading-tight">{recipe.name}</h3>
+                                                    <div className="min-w-0">
+                                                        <div className="flex flex-wrap gap-1.5 mb-1">
+                                                            {recipe.mealType && recipe.mealType.map(tag => (
+                                                                <span key={tag} className="bg-orange-100 text-orange-700 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full tracking-wide">
+                                                                    {tag}
+                                                                </span>
+                                                            ))}
+                                                            <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full tracking-wide border ${recipe.difficulty === 'Easy' ? 'border-green-200 text-green-600' :
+                                                                recipe.difficulty === 'Medium' ? 'border-yellow-200 text-yellow-600' : 'border-red-200 text-red-600'
+                                                                }`}>
+                                                                {recipe.difficulty}
+                                                            </span>
+                                                        </div>
+                                                        <h3 className="text-base sm:text-xl font-bold text-gray-900 leading-tight">{recipe.name}</h3>
+                                                    </div>
                                                 </div>
                                                 {/* ✅ Кнопка закладки с чётким визуальным состоянием */}
                                                 <button
                                                     onClick={() => onSaveRecipe(recipe)}
+                                                    disabled={isSaved}
                                                     className={`p-2 rounded-full transition-all shrink-0 ${isSaved
-                                                        ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
+                                                        ? 'bg-orange-500 text-white shadow-md shadow-orange-200 cursor-default'
                                                         : 'bg-gray-50 text-gray-400 hover:bg-orange-50 hover:text-orange-500'
                                                         }`}
-                                                    title={isSaved ? 'В избранном' : 'Добавить в избранное'}
+                                                    title={isSaved ? '✓ Сохранено' : 'Добавить в избранное'}
                                                 >
                                                     <Bookmark size={18} fill={isSaved ? "currentColor" : "none"} />
                                                 </button>

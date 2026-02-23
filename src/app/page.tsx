@@ -13,6 +13,7 @@ import { useUser } from '@/lib/hooks/useUser';
 import { useSupabaseSync } from '@/lib/hooks/useSupabaseSync';
 import Link from 'next/link';
 import PWAInstallBanner from '@/components/PWAInstallBanner';
+import { addItemsToShoppingList } from '@/app/actions/shopping';
 
 // Allow 60 seconds for AI generation
 export const maxDuration = 60;
@@ -36,8 +37,20 @@ export default function Home() {
   const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'salad', 'main', 'dessert']);
   const [errorMessage, setErrorMessage] = useState('');
 
+  // ✅ Сохранение рецепта + автодобавление недостающих продуктов в покупки
   const saveRecipe = async (recipe: Recipe) => {
     await saveRecipeToStore(recipe);
+
+    // Автоматически добавляем недостающие продукты в список покупок
+    if (recipe.missingIngredients && recipe.missingIngredients.length > 0 && user) {
+      const items = recipe.missingIngredients.map(name => ({
+        name,
+        quantity: '',
+        reason: `для рецепта «${recipe.name}»`
+      }));
+      addItemsToShoppingList(recipe.name, items, recipe.id ?? null)
+        .catch(err => console.error('Ошибка авто-добавления покупок:', err));
+    }
   };
 
   const removeRecipe = async (id: string) => {
@@ -128,8 +141,8 @@ export default function Home() {
         {/* Sidebar (Desktop Only) */}
         <aside className="hidden md:flex flex-col w-64 bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
           <div className="mb-10 flex items-center gap-3 px-2">
-            <div className="w-10 h-10 flex items-center justify-center">
-              <img src="/logo-chef.svg" alt="Шеф-холодильник" className="w-10 h-10" />
+            <div className="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-orange-400 to-red-500 rounded-xl text-white">
+              <ChefHat size={24} />
             </div>
             <h1 className="font-extrabold text-xl tracking-tight text-gray-800">ШЕФ<br /><span className="text-orange-500">ХОЛОДИЛЬНИК</span></h1>
           </div>
@@ -232,6 +245,7 @@ export default function Home() {
                 family={family}
                 onSaveRecipe={saveRecipe}
                 savedRecipeIds={savedRecipes.map(r => r.id!)}
+                savedRecipeNames={savedRecipes.map(r => r.name)}
                 // ✅ Передаём поднятое состояние
                 plan={chefPlan}
                 setPlan={setChefPlan}

@@ -231,31 +231,32 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({ family, setFamily }) =
                     const { tdee } = calculateNeeds(member);
                     return (
                         <div key={member.id} className="p-4 border border-gray-100 rounded-xl relative hover:shadow-md transition-shadow group bg-stone-50/50">
-                            <div className="absolute top-2 right-2 flex gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity bg-white/80 rounded-lg backdrop-blur-sm pl-2">
-                                <button onClick={() => handleEditClick(member)} className="text-gray-400 hover:text-blue-500 p-1.5">
-                                    <Edit2 size={14} />
-                                </button>
-                                <button onClick={() => removeMember(member.id)} className="text-gray-400 hover:text-red-500 p-1.5">
-                                    <X size={14} />
-                                </button>
-                            </div>
-
-                            <div className="flex items-start justify-between mb-2 pr-12">
-                                <div>
+                            <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1 min-w-0">
                                     <h3 className="font-bold text-gray-800 flex items-center gap-2">
                                         {member.name}
                                         {member.gender === Gender.MALE ? <span className="text-blue-400 text-[10px]">♂</span> : <span className="text-pink-400 text-[10px]">♀</span>}
                                     </h3>
                                     <p className="text-xs text-gray-500">{member.age} лет, {member.weight}кг / {member.height}см</p>
                                 </div>
-                                <div className="text-right">
+                                <div className="text-right shrink-0 ml-2">
                                     <span className="block text-lg font-extrabold text-green-600 leading-none">~{tdee}</span>
                                     <span className="text-[10px] text-gray-400 uppercase font-bold">ккал/день</span>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-1 text-xs text-gray-600 font-medium mb-1.5 bg-white px-2 py-1 rounded border border-gray-100 w-fit">
-                                <HeartPulse size={12} className="text-red-400" /> {member.goal}
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1 text-xs text-gray-600 font-medium bg-white px-2 py-1 rounded border border-gray-100 w-fit">
+                                    <HeartPulse size={12} className="text-red-400" /> {member.goal}
+                                </div>
+                                <div className="flex gap-1">
+                                    <button onClick={() => handleEditClick(member)} className="text-gray-400 hover:text-blue-500 p-1.5">
+                                        <Edit2 size={14} />
+                                    </button>
+                                    <button onClick={() => removeMember(member.id)} className="text-gray-400 hover:text-red-500 p-1.5">
+                                        <X size={14} />
+                                    </button>
+                                </div>
                             </div>
 
                             {member.preferences && <p className="text-xs text-gray-500 mt-1 italic">⚠️ {member.preferences}</p>}
@@ -269,6 +270,6 @@ export const FamilyPanel: React.FC<FamilyPanelProps> = ({ family, setFamily }) =
                     </div>
                 )}
             </div>
-        </div>
+        </div >
     );
 };
