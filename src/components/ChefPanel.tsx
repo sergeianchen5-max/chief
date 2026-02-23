@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ChefHat, ShoppingCart, Clock, TrendingUp, CheckCircle, Loader2, Send, Bookmark, Scale, Utensils, ChevronDown, ChevronUp, Sun, Moon, Coffee, Soup, CheckSquare, Square, User, Users, Copy, Star, Eye, EyeOff, Share2, Download, ExternalLink, Printer, Image as ImageIcon, PlusCircle, StickyNote, Mail, PackagePlus, Zap, Check } from 'lucide-react';
+import { ChefHat, ShoppingCart, Clock, TrendingUp, CheckCircle, Loader2, Send, Bookmark, Scale, Utensils, ChevronDown, ChevronUp, Sun, Moon, Coffee, Soup, CheckSquare, Square, User, Users, Copy, Star, Eye, EyeOff, Share2, Download, ExternalLink, Printer, Image as ImageIcon, PlusCircle, StickyNote, Mail, PackagePlus, Zap, Check, RefreshCw } from 'lucide-react';
 import { ChefPlan, FamilyMember, Ingredient, Recipe, ShoppingItem, MealCategory, MEAL_CATEGORIES } from '@/lib/types';
 import { GenerationService } from '@/services/generationService';
 
@@ -10,22 +10,33 @@ interface ChefPanelProps {
     family: FamilyMember[];
     onSaveRecipe: (recipe: Recipe) => void;
     savedRecipeIds: string[];
+    // ✅ Поднятое состояние из page.tsx (сохраняется при смене вкладок)
+    plan: ChefPlan | null;
+    setPlan: (plan: ChefPlan | null) => void;
+    generationState: 'idle' | 'generating' | 'success' | 'error';
+    setGenerationState: (state: 'idle' | 'generating' | 'success' | 'error') => void;
+    selectedCategories: MealCategory[];
+    setSelectedCategories: (cats: MealCategory[]) => void;
+    errorMessage: string;
+    setErrorMessage: (msg: string) => void;
 }
 
-export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveRecipe, savedRecipeIds }) => {
+export const ChefPanel: React.FC<ChefPanelProps> = ({
+    inventory, family, onSaveRecipe, savedRecipeIds,
+    plan, setPlan, generationState, setGenerationState,
+    selectedCategories, setSelectedCategories, errorMessage, setErrorMessage
+}) => {
     const [onlyFridge, setOnlyFridge] = useState(false);
-    const [plan, setPlan] = useState<ChefPlan | null>(null);
-    const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
-    const [errorMessage, setErrorMessage] = useState<string>('');
     const [elapsedSeconds, setElapsedSeconds] = useState(0);
     const [showShoppingList, setShowShoppingList] = useState(false);
     const [expandedRecipe, setExpandedRecipe] = useState<string | null>(null);
     const [checkedShoppingItems, setCheckedShoppingItems] = useState<Record<string, boolean>>({});
-    const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'soup', 'main', 'dessert']);
 
     const toggleCategory = (cat: MealCategory) => {
-        setSelectedCategories(prev =>
-            prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
+        setSelectedCategories(
+            selectedCategories.includes(cat)
+                ? selectedCategories.filter(c => c !== cat)
+                : [...selectedCategories, cat]
         );
     };
 
@@ -48,9 +59,6 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
             alert("Добавьте продукты в холодильник перед генерацией!");
             return;
         }
-        if (family.length === 0) {
-            // Optional warning, but allowed
-        }
 
         setGenerationState('generating');
         setPlan(null);
@@ -58,7 +66,6 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
         setShowShoppingList(false);
 
         try {
-            // Использование нового сервиса с фоллбеком
             const result = await GenerationService.generateChefPlanSafe(inventory, family, onlyFridge, selectedCategories);
 
             if (result.success && result.data) {
@@ -76,6 +83,13 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
             setErrorMessage('Ошибка соединения. Проверьте интернет.');
             setGenerationState('error');
         }
+    };
+
+    const handleRegenerate = () => {
+        setPlan(null);
+        setGenerationState('idle');
+        setShowShoppingList(false);
+        setExpandedRecipe(null);
     };
 
     const toggleShoppingItem = (name: string) => {
@@ -100,39 +114,26 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
         navigator.clipboard.writeText(text).then(() => alert("План скопирован!"));
     };
 
-    const calculateTotalNutrients = () => {
-        if (!plan) return { cal: 0, prot: 0, fat: 0, carb: 0 };
-        // Simplified total (just sum of numbers found in strings)
-        return { cal: 0, prot: 0, fat: 0, carb: 0 }; // Placeholder
-    };
-
-    // Helper to toggle recipe details
     const toggleRecipeExpand = (id: string) => {
-        if (expandedRecipe === id) {
-            setExpandedRecipe(null);
-        } else {
-            setExpandedRecipe(id);
-        }
+        setExpandedRecipe(expandedRecipe === id ? null : id);
     };
-
 
     if (generationState === 'generating') {
         return (
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center h-full text-center space-y-6 animate-pulse">
+            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center justify-center h-full text-center space-y-6 animate-pulse">
                 <div className="relative">
                     <div className="absolute inset-0 bg-orange-500 blur-xl opacity-20 rounded-full animate-pulse"></div>
                     <ChefHat size={64} className="text-orange-500 animate-bounce relative z-10" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800">Шеф думает...</h2>
+                <h2 className="text-xl sm:text-2xl font-bold text-gray-800">Шеф думает...</h2>
                 <div className="text-3xl font-mono font-bold text-orange-500">{elapsedSeconds} сек</div>
                 <div className="max-w-md space-y-2 text-gray-500 text-sm">
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-green-500" /> Анализирую {inventory.length} продуктов</p>
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-blue-500" /> Учитываю цели {family.length} членов семьи</p>
                     <p className="flex items-center gap-2 justify-center"><CheckCircle size={14} className="text-purple-500" /> Подбираю рецепты...</p>
                 </div>
-
                 <div className="w-full max-w-xs bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                    <div className="bg-gradient-to-r from-orange-400 to-red-500 h-2.5 rounded-full animate-[shimmer_1s_infinite]" style={{ width: `${Math.min(90, elapsedSeconds * 2)}%`, transition: 'width 1s ease' }}></div>
+                    <div className="bg-gradient-to-r from-orange-400 to-red-500 h-2.5 rounded-full" style={{ width: `${Math.min(90, elapsedSeconds * 2)}%`, transition: 'width 1s ease' }}></div>
                 </div>
                 {elapsedSeconds > 15 && <p className="text-xs text-gray-400">Почти готово, подождите ещё немного...</p>}
             </div>
@@ -141,7 +142,7 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
 
     if (generationState === 'error') {
         return (
-            <div className="bg-white p-8 rounded-2xl shadow-sm border border-red-100 flex flex-col items-center justify-center h-full text-center space-y-4">
+            <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-red-100 flex flex-col items-center justify-center h-full text-center space-y-4">
                 <div className="bg-red-50 p-4 rounded-full">
                     <Soup size={48} className="text-red-500" />
                 </div>
@@ -158,51 +159,63 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
     }
 
     return (
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col">
+        <div className="bg-white p-3 sm:p-6 rounded-2xl shadow-sm border border-gray-100 h-full flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-3">
-                    <div className="bg-gradient-to-br from-orange-400 to-orange-600 p-2 text-white rounded-xl shadow-lg shadow-orange-200">
-                        <ChefHat size={28} />
+            <div className="flex items-center justify-between mb-4 sm:mb-8 gap-2">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <div className="bg-gradient-to-br from-orange-400 to-orange-600 p-2 text-white rounded-xl shadow-lg shadow-orange-200 shrink-0">
+                        <ChefHat size={22} />
                     </div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-800 tracking-tight">Меню от Шефа</h2>
-                        <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Персональный план питания</p>
+                    <div className="min-w-0">
+                        <h2 className="text-lg sm:text-2xl font-bold text-gray-800 tracking-tight leading-tight">Меню от Шефа</h2>
+                        <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider hidden sm:block">Персональный план питания</p>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-3 bg-gray-50 p-1.5 rounded-xl border border-gray-100">
-                    <button
-                        // This state isn't actually managed, maybe just toggle visually for now if needed. 
-                        // Wait, onlyFridge state is managed above.
-                        onClick={() => setOnlyFridge(false)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 
-                    ${!onlyFridge ? 'bg-white text-gray-800 shadow-sm border border-gray-100' : 'text-gray-500 hover:bg-gray-200'}`}
-                    >
-                        <ShoppingCart size={14} /> Надо купить
-                    </button>
-                    <button
-                        onClick={() => setOnlyFridge(true)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5
-                    ${onlyFridge ? 'bg-white text-green-700 shadow-sm border border-green-100' : 'text-gray-500 hover:bg-gray-200'}`}
-                    >
-                        <CheckCircle size={14} /> Только из холодильника
-                    </button>
+                <div className="flex items-center gap-2 shrink-0">
+                    {/* ✅ Кнопка перегенерировать — появляется только если есть план */}
+                    {plan && (
+                        <button
+                            onClick={handleRegenerate}
+                            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-gray-100 text-gray-600 rounded-xl text-xs font-semibold hover:bg-orange-50 hover:text-orange-600 transition-all border border-gray-200"
+                            title="Сбросить и создать новое меню"
+                        >
+                            <RefreshCw size={14} />
+                            <span className="hidden sm:inline">Перегенерировать</span>
+                        </button>
+                    )}
+
+                    <div className="flex items-center gap-1 bg-gray-50 p-1 rounded-xl border border-gray-100">
+                        <button
+                            onClick={() => setOnlyFridge(false)}
+                            className={`px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1 
+                        ${!onlyFridge ? 'bg-white text-gray-800 shadow-sm border border-gray-100' : 'text-gray-500 hover:bg-gray-200'}`}
+                        >
+                            <ShoppingCart size={12} /> <span className="hidden sm:inline">Надо купить</span>
+                        </button>
+                        <button
+                            onClick={() => setOnlyFridge(true)}
+                            className={`px-2 sm:px-3 py-1.5 rounded-lg text-[11px] sm:text-xs font-semibold transition-all flex items-center gap-1
+                        ${onlyFridge ? 'bg-white text-green-700 shadow-sm border border-green-100' : 'text-gray-500 hover:bg-gray-200'}`}
+                        >
+                            <CheckCircle size={12} /> <span className="hidden sm:inline">Из холодильника</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
             {!plan ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6 bg-stone-50/50 rounded-2xl border-2 border-dashed border-gray-200 m-4 p-6">
-                    <div className="bg-white p-5 rounded-full shadow-sm mb-1">
-                        <Zap size={44} className="text-yellow-400 fill-current" />
+                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4 sm:space-y-6 bg-stone-50/50 rounded-2xl border-2 border-dashed border-gray-200 mx-1 sm:m-4 p-4 sm:p-6">
+                    <div className="bg-white p-4 sm:p-5 rounded-full shadow-sm mb-1">
+                        <Zap size={40} className="text-yellow-400 fill-current" />
                     </div>
 
                     <div className="max-w-md mx-auto w-full">
-                        <h3 className="text-lg font-bold text-gray-700 mb-1">Что приготовить?</h3>
+                        <h3 className="text-base sm:text-lg font-bold text-gray-700 mb-1">Что приготовить?</h3>
                         <p className="text-gray-400 mb-4 text-sm">Выберите категории блюд для генерации</p>
 
                         {/* Чекбоксы категорий */}
-                        <div className="grid grid-cols-2 gap-2 mb-6 text-left">
+                        <div className="grid grid-cols-2 gap-2 mb-4 sm:mb-6 text-left">
                             {MEAL_CATEGORIES.map(cat => {
                                 const isSelected = selectedCategories.includes(cat.id);
                                 return (
@@ -210,17 +223,17 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                                         key={cat.id}
                                         type="button"
                                         onClick={() => toggleCategory(cat.id)}
-                                        className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border-2 transition-all text-sm font-medium ${isSelected
+                                        className={`flex items-center gap-2 px-2 sm:px-3 py-2 sm:py-2.5 rounded-xl border-2 transition-all text-xs sm:text-sm font-medium ${isSelected
                                             ? 'border-orange-300 bg-orange-50 text-orange-700 shadow-sm'
                                             : 'border-gray-100 bg-white text-gray-400 hover:border-gray-200 hover:bg-gray-50'
                                             }`}
                                     >
-                                        <span className="text-lg">{cat.emoji}</span>
-                                        <span className="flex-1">{cat.label}</span>
+                                        <span className="text-base sm:text-lg">{cat.emoji}</span>
+                                        <span className="flex-1 text-left">{cat.label}</span>
                                         {isSelected ? (
-                                            <CheckSquare size={16} className="text-orange-500 flex-shrink-0" />
+                                            <CheckSquare size={14} className="text-orange-500 flex-shrink-0" />
                                         ) : (
-                                            <Square size={16} className="text-gray-300 flex-shrink-0" />
+                                            <Square size={14} className="text-gray-300 flex-shrink-0" />
                                         )}
                                     </button>
                                 );
@@ -230,7 +243,7 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                         <button
                             onClick={handleGenerate}
                             disabled={inventory.length === 0 || selectedCategories.length === 0}
-                            className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-lg font-bold py-4 px-8 rounded-xl shadow-xl shadow-orange-200 transition-transform active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group"
+                            className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white text-base sm:text-lg font-bold py-3 sm:py-4 px-8 rounded-xl shadow-xl shadow-orange-200 transition-transform active:scale-95 flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group"
                         >
                             <ChefHat className="group-hover:rotate-12 transition-transform" />
                             СОСТАВИТЬ МЕНЮ
@@ -240,23 +253,23 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                     </div>
                 </div>
             ) : (
-                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto pr-1 sm:pr-2 custom-scrollbar">
                     {/* Summary Card */}
-                    <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-5 rounded-xl shadow-lg mb-6 relative overflow-hidden group">
+                    <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-4 sm:p-5 rounded-xl shadow-lg mb-4 sm:mb-6 relative overflow-hidden group">
                         <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-                            <TrendingUp size={100} />
+                            <TrendingUp size={80} />
                         </div>
-                        <div className="flex justify-between items-start relative z-10">
-                            <div>
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 relative z-10">
+                            <div className="flex-1 min-w-0">
                                 <h3 className="font-bold text-orange-400 mb-1 flex items-center gap-2"><ChefHat size={16} /> Мнение Шефа:</h3>
-                                <p className="text-sm text-gray-300 leading-relaxed max-w-xl italic">"{plan.summary}"</p>
+                                <p className="text-sm text-gray-300 leading-relaxed italic line-clamp-3 sm:line-clamp-none">"{plan.summary}"</p>
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex gap-2 shrink-0">
                                 <button onClick={sharePlan} className="text-gray-400 hover:text-white transition-colors bg-white/10 p-2 rounded-lg backdrop-blur-sm" title="Поделиться">
                                     <Share2 size={16} />
                                 </button>
-                                <button onClick={() => setShowShoppingList(!showShoppingList)} className={`text-sm font-semibold px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ${showShoppingList ? 'bg-white text-gray-900' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
-                                    <ShoppingCart size={16} /> {showShoppingList ? 'К Рецептам' : `Список покупок (${plan.shoppingList.length})`}
+                                <button onClick={() => setShowShoppingList(!showShoppingList)} className={`text-sm font-semibold px-3 py-2 rounded-lg transition-colors flex items-center gap-2 ${showShoppingList ? 'bg-white text-gray-900' : 'bg-orange-500 text-white hover:bg-orange-600'}`}>
+                                    <ShoppingCart size={16} /> {showShoppingList ? 'К Рецептам' : `Покупки (${plan.shoppingList.length})`}
                                 </button>
                             </div>
                         </div>
@@ -306,19 +319,20 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                             )}
                         </div>
                     ) : (
-                        <div className="space-y-6 animate-fade-in">
+                        <div className="space-y-4 sm:space-y-6 animate-fade-in">
                             {plan.recipes.map((recipe, index) => {
                                 const recipeId = recipe.id || index.toString();
                                 const isExpanded = expandedRecipe === recipeId;
+                                // ✅ isSaved проверяется по id рецепта
                                 const isSaved = savedRecipeIds.includes(recipeId);
 
                                 return (
                                     <div key={recipeId} className="border border-gray-100 rounded-2xl shadow-sm hover:shadow-md transition-shadow bg-white overflow-hidden recipe-card-print">
                                         {/* Card Header & Main Info */}
-                                        <div className="p-5">
-                                            <div className="flex justify-between items-start mb-3">
-                                                <div>
-                                                    <div className="flex gap-2 mb-2">
+                                        <div className="p-4 sm:p-5">
+                                            <div className="flex justify-between items-start mb-3 gap-2">
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex flex-wrap gap-1.5 mb-2">
                                                         {recipe.mealType && recipe.mealType.map(tag => (
                                                             <span key={tag} className="bg-orange-100 text-orange-700 text-[10px] uppercase font-bold px-2 py-0.5 rounded-full tracking-wide">
                                                                 {tag}
@@ -330,44 +344,48 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                                                             {recipe.difficulty}
                                                         </span>
                                                     </div>
-                                                    <h3 className="text-xl font-bold text-gray-900 leading-tight">{recipe.name}</h3>
+                                                    <h3 className="text-base sm:text-xl font-bold text-gray-900 leading-tight">{recipe.name}</h3>
                                                 </div>
+                                                {/* ✅ Кнопка закладки с чётким визуальным состоянием */}
                                                 <button
                                                     onClick={() => onSaveRecipe(recipe)}
-                                                    disabled={isSaved}
-                                                    className={`p-2 rounded-full transition-colors ${isSaved ? 'bg-orange-100 text-orange-500' : 'bg-gray-50 text-gray-400 hover:bg-orange-50 hover:text-orange-500'}`}
+                                                    className={`p-2 rounded-full transition-all shrink-0 ${isSaved
+                                                        ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
+                                                        : 'bg-gray-50 text-gray-400 hover:bg-orange-50 hover:text-orange-500'
+                                                        }`}
+                                                    title={isSaved ? 'В избранном' : 'Добавить в избранное'}
                                                 >
-                                                    <Bookmark size={20} fill={isSaved ? "currentColor" : "none"} />
+                                                    <Bookmark size={18} fill={isSaved ? "currentColor" : "none"} />
                                                 </button>
                                             </div>
 
-                                            <p className="text-gray-600 text-sm mb-4 line-clamp-2 md:line-clamp-none leading-relaxed">
+                                            <p className="text-gray-600 text-sm mb-3 line-clamp-2 leading-relaxed">
                                                 {recipe.description}
                                             </p>
 
-                                            <div className="flex flex-wrap gap-4 text-xs font-medium text-gray-500 mb-4 bg-gray-50 p-3 rounded-xl">
+                                            <div className="flex flex-wrap gap-3 text-xs font-medium text-gray-500 mb-3 bg-gray-50 p-2.5 rounded-xl">
                                                 <div className="flex items-center gap-1.5">
-                                                    <Clock size={16} className="text-orange-400" /> {recipe.cookingTimeMinutes} мин
+                                                    <Clock size={14} className="text-orange-400" /> {recipe.cookingTimeMinutes} мин
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
-                                                    <Scale size={16} className="text-blue-400" /> {recipe.weightPerServing} / порция
+                                                    <Scale size={14} className="text-blue-400" /> {recipe.weightPerServing} / порция
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
-                                                    <TrendingUp size={16} className="text-green-400" /> {recipe.caloriesPerServing}
+                                                    <TrendingUp size={14} className="text-green-400" /> {recipe.caloriesPerServing}
                                                 </div>
                                             </div>
 
                                             {/* Ingredient Preview */}
-                                            <div className="flex flex-wrap gap-1.5 mb-4">
-                                                {recipe.ingredientsToUse.slice(0, 5).map((ing, i) => (
+                                            <div className="flex flex-wrap gap-1.5 mb-3">
+                                                {recipe.ingredientsToUse.slice(0, 4).map((ing, i) => (
                                                     <span key={i} className="text-[11px] bg-green-50 text-green-700 px-2 py-1 rounded border border-green-100">
                                                         {ing}
                                                     </span>
                                                 ))}
-                                                {recipe.ingredientsToUse.length > 5 && (
-                                                    <span className="text-[11px] text-gray-400 px-1 py-1">+{recipe.ingredientsToUse.length - 5} еще</span>
+                                                {recipe.ingredientsToUse.length > 4 && (
+                                                    <span className="text-[11px] text-gray-400 px-1 py-1">+{recipe.ingredientsToUse.length - 4} ещё</span>
                                                 )}
-                                                {recipe.missingIngredients.length > 0 && recipe.missingIngredients.map((ing, i) => (
+                                                {recipe.missingIngredients.length > 0 && recipe.missingIngredients.slice(0, 3).map((ing, i) => (
                                                     <span key={`miss-${i}`} className="text-[11px] bg-red-50 text-red-700 px-2 py-1 rounded border border-red-100 flex items-center gap-1">
                                                         <ShoppingCart size={10} /> {ing}
                                                     </span>
@@ -386,7 +404,7 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
 
                                         {/* Expanded Details */}
                                         {isExpanded && (
-                                            <div className="border-t border-gray-100 bg-gray-50/50 p-5 animate-slide-down">
+                                            <div className="border-t border-gray-100 bg-gray-50/50 p-4 sm:p-5 animate-slide-down">
                                                 {/* Health Stats */}
                                                 <div className="mb-6">
                                                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Почему это полезно</h4>
@@ -398,23 +416,22 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                                                     <div className="space-y-2">
                                                         {recipe.familySuitability.map((suit, idx) => (
                                                             <div key={idx} className="flex items-center gap-3 bg-white p-2 rounded-lg border border-gray-100 shadow-sm">
-                                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${suit.percentage >= 80 ? 'bg-green-100 text-green-700' :
+                                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${suit.percentage >= 80 ? 'bg-green-100 text-green-700' :
                                                                     suit.percentage >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
                                                                     }`}>
                                                                     {suit.percentage}%
                                                                 </div>
-                                                                <div className="flex-1">
+                                                                <div className="flex-1 min-w-0">
                                                                     <div className="flex justify-between items-center">
-                                                                        <span className="font-bold text-gray-800 text-sm">{suit.memberName}</span>
-                                                                        {/* Nutrition Stats (Mini) */}
+                                                                        <span className="font-bold text-gray-800 text-sm truncate">{suit.memberName}</span>
                                                                         {suit.nutritionStats && (
-                                                                            <div className="flex gap-2 text-[10px] text-gray-400">
-                                                                                <span title="Ккал">%DV: {suit.nutritionStats.caloriesPercent}% Cal</span>
-                                                                                <span title="Белок">{suit.nutritionStats.proteinPercent}% Prot</span>
+                                                                            <div className="flex gap-2 text-[10px] text-gray-400 shrink-0">
+                                                                                <span title="Ккал">{suit.nutritionStats.caloriesPercent}% Кк</span>
+                                                                                <span title="Белок">{suit.nutritionStats.proteinPercent}% Б</span>
                                                                             </div>
                                                                         )}
                                                                     </div>
-                                                                    <p className="text-xs text-gray-500">{suit.reason}</p>
+                                                                    <p className="text-xs text-gray-500 line-clamp-1">{suit.reason}</p>
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -424,7 +441,7 @@ export const ChefPanel: React.FC<ChefPanelProps> = ({ inventory, family, onSaveR
                                                 {/* Instructions */}
                                                 <div>
                                                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Utensils size={14} /> Процесс приготовления</h4>
-                                                    <ol className="space-y-4 relative border-l-2 border-orange-100 ml-3 pl-5 py-2">
+                                                    <ol className="space-y-3 relative border-l-2 border-orange-100 ml-3 pl-5 py-2">
                                                         {recipe.instructions.map((step, sIdx) => (
                                                             <li key={sIdx} className="text-sm text-gray-700 relative">
                                                                 <span className="absolute -left-[27px] top-0 bg-orange-100 text-orange-600 font-bold w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm ring-2 ring-white">{sIdx + 1}</span>

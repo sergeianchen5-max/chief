@@ -3,9 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { getPendingRecipes, updateRecipeStatus } from '@/app/actions/admin';
 import { useUser } from '@/lib/hooks/useUser';
-import { ShieldCheck, Check, X, Eye, Loader2, Clock, LogIn } from 'lucide-react';
+import { ShieldCheck, Check, X, Loader2, Clock, LogIn } from 'lucide-react';
 import Link from 'next/link';
-import { createClient } from '@/lib/supabase/client';
 
 export default function AdminPage() {
     const { user, loading: authLoading } = useUser();
@@ -13,40 +12,25 @@ export default function AdminPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Добавляем состояния для формы логина
-    const [email, setEmail] = useState('anchen-ser@yandex.ru');
-    const [password, setPassword] = useState('');
-    const [loginError, setLoginError] = useState('');
-    const [isLoggingIn, setIsLoggingIn] = useState(false);
-
-    const supabase = createClient();
-
-    const checkAndLoad = async () => {
-        try {
-            setLoading(true);
-            const res = await getPendingRecipes();
-            if (res.success && res.data) {
-                setRecipes(res.data);
-                setError(null);
-            } else {
-                setError(res.error || 'Failed to load');
-            }
-        } catch (err: any) {
-            setError(err.message || 'Unknown error');
-        } finally {
-            setLoading(false);
+    const loadRecipes = async () => {
+        setLoading(true);
+        const res = await getPendingRecipes();
+        if (res.success && res.data) {
+            setRecipes(res.data);
+            setError(null);
+        } else {
+            setError(res.error || 'Ошибка загрузки');
         }
+        setLoading(false);
     };
 
     useEffect(() => {
         if (authLoading) return;
 
         if (user?.id) {
-            checkAndLoad();
+            loadRecipes();
         } else {
-            // Если пользователя нет, скрываем лоадер, чтобы отобразилась форма логина
             setLoading(false);
-            setError(null);
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id, authLoading]);
@@ -57,92 +41,62 @@ export default function AdminPage() {
 
         const res = await updateRecipeStatus(id, status, isPublic);
         if (res.success) {
-            setRecipes(prev => prev.map(r => r.id === id ? { ...r, moderation_status: status, is_public: isPublic } : r));
+            setRecipes(prev => prev.map(r =>
+                r.id === id ? { ...r, moderation_status: status, is_public: isPublic } : r
+            ));
         } else {
             alert('Ошибка: ' + res.error);
         }
     };
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setIsLoggingIn(true);
-        setLoginError('');
-
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        });
-
-        if (error) {
-            setLoginError('Ошибка входа: Неверный логин или пароль');
-            setIsLoggingIn(false);
-        }
-        // В случае успеха onAuthStateChange обновит user
-    };
-
-    if (authLoading || loading) {
-        return <div className="min-h-screen flex justify-center items-center bg-gray-50"><Loader2 className="animate-spin text-orange-500" size={48} /></div>;
-    }
-
-    if (!user) {
+    // ============= ЗАГРУЗКА =============
+    if (authLoading || (user && loading)) {
         return (
-            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-                <form onSubmit={handleLogin} className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 max-w-sm w-full">
-                    <ShieldCheck size={48} className="mx-auto text-orange-500 mb-4" />
-                    <h1 className="text-xl font-extrabold text-gray-900 mb-6 text-center">Админ Панель</h1>
-
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Email / Логин</label>
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-orange-500 focus:bg-white transition-colors"
-                                required
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 mb-1.5">Пароль</label>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-orange-500 focus:bg-white transition-colors"
-                                required
-                            />
-                        </div>
-
-                        {loginError && (
-                            <p className="text-red-500 text-sm text-center py-1">{loginError}</p>
-                        )}
-
-                        <button
-                            type="submit"
-                            disabled={isLoggingIn || !email || !password}
-                            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-orange-400 to-red-500 text-white py-3 rounded-xl font-bold hover:shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
-                        >
-                            {isLoggingIn ? <Loader2 className="animate-spin" size={20} /> : <LogIn size={20} />}
-                            {isLoggingIn ? 'Вход...' : 'Войти'}
-                        </button>
-                    </div>
-                </form>
+            <div className="min-h-screen flex justify-center items-center bg-gray-50">
+                <Loader2 className="animate-spin text-orange-500" size={48} />
             </div>
         );
     }
 
+    // ============= НЕ АВТОРИЗОВАН =============
+    if (!user) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+                <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 max-w-sm w-full text-center">
+                    <ShieldCheck size={48} className="mx-auto text-orange-500 mb-4" />
+                    <h1 className="text-xl font-extrabold text-gray-900 mb-2">Доступ закрыт</h1>
+                    <p className="text-gray-500 text-sm mb-6">
+                        Эта страница доступна только администраторам.<br />
+                        Войдите с учётной записью администратора.
+                    </p>
+                    <Link
+                        href="/auth"
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-400 to-red-500 text-white rounded-xl font-semibold shadow-sm hover:shadow-md transition-all"
+                    >
+                        <LogIn size={18} /> Войти
+                    </Link>
+                </div>
+            </div>
+        );
+    }
+
+    // ============= ОШИБКА (НЕТ ПРАВ АДМИНА) =============
     if (error) {
         return (
             <div className="min-h-screen flex justify-center items-center bg-gray-50 p-4">
                 <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center max-w-sm w-full">
                     <ShieldCheck size={48} className="mx-auto text-red-500 mb-4" />
-                    <h1 className="text-xl font-bold text-gray-900 mb-2">Доступ запрещен</h1>
-                    <p className="text-gray-600 mb-6">{error}</p>
-                    <Link href="/" className="text-orange-600 font-semibold hover:underline">Вернуться на главную</Link>
+                    <h1 className="text-xl font-bold text-gray-900 mb-2">Доступ запрещён</h1>
+                    <p className="text-gray-600 mb-2">{error}</p>
+                    <p className="text-xs text-gray-400 mb-6">
+                        Вы вошли как: <span className="font-mono">{user.email}</span>
+                    </p>
+                    <Link href="/" className="text-orange-600 font-semibold hover:underline">
+                        Вернуться на главную
+                    </Link>
                 </div>
             </div>
         );
-
     }
 
     const pending = recipes.filter(r => r.moderation_status === 'pending');
@@ -170,6 +124,12 @@ export default function AdminPage() {
                             <Clock className="text-orange-500" size={20} />
                             Ожидают проверки ({pending.length})
                         </h2>
+                        <button
+                            onClick={loadRecipes}
+                            className="text-sm text-orange-600 hover:text-orange-700 font-medium transition-colors"
+                        >
+                            Обновить
+                        </button>
                     </div>
 
                     {pending.length === 0 ? (
@@ -183,7 +143,9 @@ export default function AdminPage() {
                                     <li key={recipe.id} className="p-4 sm:p-6 hover:bg-gray-50 transition-colors flex flex-col sm:flex-row gap-4 justify-between sm:items-center">
                                         <div>
                                             <h3 className="font-bold text-gray-900 mb-1">{recipe.title}</h3>
-                                            <p className="text-xs text-gray-500">{new Date(recipe.created_at).toLocaleString()}</p>
+                                            <p className="text-xs text-gray-500">
+                                                {new Date(recipe.created_at).toLocaleString('ru-RU')}
+                                            </p>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
@@ -208,20 +170,27 @@ export default function AdminPage() {
 
                 <section>
                     <h2 className="text-xl font-bold text-gray-900 mb-4">Недавние обработанные ({processed.length})</h2>
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                        <ul className="divide-y divide-gray-100">
-                            {processed.slice(0, 50).map(recipe => (
-                                <li key={recipe.id} className="p-4 text-sm flex justify-between items-center opacity-70">
-                                    <span>{recipe.title}</span>
-                                    <div className="flex items-center gap-3">
-                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${recipe.moderation_status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                                            {recipe.moderation_status === 'approved' ? 'Опубликован' : 'Отклонен'}
+                    {processed.length === 0 ? (
+                        <div className="bg-white rounded-2xl p-6 border border-gray-100 text-center text-gray-400 text-sm">
+                            Нет обработанных рецептов
+                        </div>
+                    ) : (
+                        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+                            <ul className="divide-y divide-gray-100">
+                                {processed.slice(0, 50).map(recipe => (
+                                    <li key={recipe.id} className="p-4 text-sm flex justify-between items-center opacity-70">
+                                        <span>{recipe.title}</span>
+                                        <span className={`px-2 py-1 rounded text-xs font-semibold ${recipe.moderation_status === 'approved'
+                                                ? 'bg-green-100 text-green-700'
+                                                : 'bg-red-100 text-red-700'
+                                            }`}>
+                                            {recipe.moderation_status === 'approved' ? 'Опубликован' : 'Отклонён'}
                                         </span>
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </section>
 
             </main>

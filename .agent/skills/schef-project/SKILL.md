@@ -127,3 +127,4 @@ CREATE INDEX idx_recipes_hash ON public.recipes (inventory_hash);
 
 ## 7. Деплой
 *   **Vercel:** или GIT
+не использовать Лексема "&&" в командах

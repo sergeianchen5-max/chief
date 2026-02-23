@@ -3,14 +3,23 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 
-const ADMIN_EMAILS = process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',') : ['admin@example.com'];
+const getAdminEmails = () => {
+    if (!process.env.ADMIN_EMAILS) return ['admin@example.com'];
+    // Убираем возможные кавычки и пробелы из .env
+    return process.env.ADMIN_EMAILS.replace(/['"]/g, '').split(',').map(e => e.trim());
+};
 
 async function checkAdmin() {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    if (!user || !user.email || !ADMIN_EMAILS.includes(user.email)) {
-        throw new Error("Unauthorized");
+    if (!user || !user.email) {
+        throw new Error("Unauthorized: Требуется авторизация");
+    }
+
+    const adminEmails = getAdminEmails();
+    if (!adminEmails.includes(user.email)) {
+        throw new Error(`Unauthorized: Email ${user.email} не является администратором. Доступные: ${adminEmails.join(', ')}`);
     }
     return supabase;
 }

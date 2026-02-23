@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" fill="none">
+  <!-- Chef hat - teal colored like in the logo -->
+  <ellipse cx="100" cy="105" rx="68" ry="12" fill="#2dd4bf"/>
+  <!-- Hat dome left bump -->
+  <ellipse cx="55" cy="78" rx="28" ry="34" fill="#2dd4bf"/>
+  <!-- Hat dome center (main) -->
+  <ellipse cx="100" cy="62" rx="38" ry="48" fill="#2dd4bf"/>
+  <!-- Hat dome right bump -->
+  <ellipse cx="145" cy="78" rx="28" ry="34" fill="#2dd4bf"/>
+  <!-- Hat brim shadow/detail -->
+  <rect x="32" y="100" width="136" height="16" rx="8" fill="#14b8a6"/>
+  <!-- Dark outlines for hat -->
+  <ellipse cx="100" cy="105" rx="68" ry="12" stroke="#1f2937" stroke-width="4" fill="none"/>
+  <path d="M 32 105 Q 55 44 100 30 Q 145 44 168 105" stroke="#1f2937" stroke-width="4" fill="none"/>
+  
+  <!-- Fork (left) inside hat -->
+  <g transform="translate(82, 50)">
+    <line x1="0" y1="5" x2="0" y2="45" stroke="#1f2937" stroke-width="3.5" stroke-linecap="round"/>
+    <line x1="-5" y1="5" x2="-5" y2="18" stroke="#1f2937" stroke-width="3" stroke-linecap="round"/>
+    <line x1="5" y1="5" x2="5" y2="18" stroke="#1f2937" stroke-width="3" stroke-linecap="round"/>
+    <path d="M-5 18 Q 0 24 5 18" stroke="#1f2937" stroke-width="3" fill="none"/>
+  </g>
+  
+  <!-- Spoon (right) inside hat -->
+  <g transform="translate(118, 50)">
+    <line x1="0" y1="20" x2="0" y2="48" stroke="#1f2937" stroke-width="3.5" stroke-linecap="round"/>
+    <ellipse cx="0" cy="12" rx="6" ry="9" fill="#1f2937"/>
+  </g>
+  
+  <!-- Refrigerator body -->
+  <rect x="40" y="116" width="120" height="110" rx="12" fill="white" stroke="#1f2937" stroke-width="4"/>
+  <!-- Fridge divider (freezer line) -->
+  <line x1="40" y1="158" x2="160" y2="158" stroke="#1f2937" stroke-width="3"/>
+  <!-- Fridge handle top -->
+  <rect x="145" y="125" width="6" height="22" rx="3" fill="#1f2937"/>
+  <!-- Fridge handle bottom -->
+  <rect x="145" y="167" width="6" height="30" rx="3" fill="#1f2937"/>
+</svg>

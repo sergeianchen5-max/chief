@@ -4,44 +4,65 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
+// Строгий тип профиля — соответствует таблице profiles в Supabase
+export interface UserProfile {
+    id: string;
+    email: string | null;
+    display_name: string | null;
+    subscription_tier: 'free' | 'pro';
+    subscription_active: boolean;
+    daily_generations_count: number;
+    daily_generations_reset_at: string | null;
+    created_at: string;
+}
+
 export function useUser() {
     const [user, setUser] = useState<User | null>(null);
-    const [profile, setProfile] = useState<any | null>(null);
+    const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const supabase = createClient();
 
     useEffect(() => {
         let isMounted = true;
 
+        const loadProfile = async (userId: string): Promise<UserProfile | null> => {
+            try {
+                const { data, error } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .single();
+
+                if (error && error.code !== 'PGRST116') {
+                    console.error('[useUser] Ошибка загрузки профиля:', error);
+                }
+                return (data as UserProfile) || null;
+            } catch (err) {
+                console.error('[useUser] Критическая ошибка loadProfile:', err);
+                return null;
+            }
+        };
+
         const getUser = async () => {
             try {
-                // Используем getUser для надежности (getSession может кэшироваться слишком агрессивно)
                 const { data: { user }, error: authError } = await supabase.auth.getUser();
                 if (authError) throw authError;
 
-                if (isMounted) setUser(user);
+                if (!isMounted) return;
+                setUser(user);
 
                 if (user) {
-                    const { data: profile, error: profError } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', user.id)
-                        .single();
-
-                    if (profError && profError.code !== 'PGRST116') {
-                        console.error('[useUser] Ошибка загрузки профиля:', profError);
-                    }
-                    if (isMounted) setProfile(profile || null);
+                    const prof = await loadProfile(user.id);
+                    if (isMounted) setProfile(prof);
                 } else {
                     if (isMounted) setProfile(null);
                 }
             } catch (err: any) {
-                if (err.message && err.message.includes('Auth session missing')) {
-                    // Игнорируем штатную ошибку отсутствия сессии
-                } else {
+                if (!err.message?.includes('Auth session missing')) {
                     console.error('[useUser] Ошибка загрузки пользователя:', err);
                 }
             } finally {
+                // Гарантированно снимаем loading — даже если профиль не загрузился
                 if (isMounted) setLoading(false);
             }
         };
@@ -51,26 +72,24 @@ export function useUser() {
         // Подписка на изменения состояния Auth
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             async (_event, session) => {
-                const currUser = session?.user ?? null;
                 if (!isMounted) return;
 
+                const currUser = session?.user ?? null;
                 setUser(currUser);
 
-                if (currUser) {
-                    const { data: prof, error: profError } = await supabase
-                        .from('profiles')
-                        .select('*')
-                        .eq('id', currUser.id)
-                        .single();
-                    if (profError && profError.code !== 'PGRST116') {
-                        console.error('[useUser] Ошибка профиля (AuthChange):', profError);
+                // Оборачиваем в try-catch чтобы setLoading(false) вызвался ВСЕГДА
+                try {
+                    if (currUser) {
+                        const prof = await loadProfile(currUser.id);
+                        if (isMounted) setProfile(prof);
+                    } else {
+                        if (isMounted) setProfile(null);
                     }
-                    if (isMounted) setProfile(prof || null);
-                } else {
-                    if (isMounted) setProfile(null);
+                } catch (err) {
+                    console.error('[useUser] Ошибка в onAuthStateChange:', err);
+                } finally {
+                    if (isMounted) setLoading(false);
                 }
-
-                if (isMounted) setLoading(false);
             }
         );
 
@@ -78,6 +97,7 @@ export function useUser() {
             isMounted = false;
             subscription.unsubscribe();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const signOut = async () => {

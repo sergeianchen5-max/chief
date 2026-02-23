@@ -2,15 +2,17 @@
 
 import React, { useState } from 'react';
 import { Ingredient, FamilyMember, Recipe, ChefPlan } from '@/lib/types';
+import { MealCategory } from '@/lib/types';
 import { FridgePanel } from '@/components/FridgePanel';
 import { FamilyPanel } from '@/components/FamilyPanel';
 import { ChefPanel } from '@/components/ChefPanel';
 import { RecipeBasePanel } from '@/components/RecipeBasePanel';
 import { ShoppingListPanel } from '@/components/ShoppingListPanel';
-import { Package, Users, ChefHat, BookOpen, LogIn, LogOut, LayoutDashboard, ShoppingCart } from 'lucide-react';
+import { Package, Users, ChefHat, BookOpen, LogIn, LogOut, LayoutDashboard, ShoppingCart, Crown, Zap } from 'lucide-react';
 import { useUser } from '@/lib/hooks/useUser';
 import { useSupabaseSync } from '@/lib/hooks/useSupabaseSync';
 import Link from 'next/link';
+import Image from 'next/image';
 
 // Allow 60 seconds for AI generation
 export const maxDuration = 60;
@@ -26,6 +28,12 @@ export default function Home() {
     savedRecipes, saveRecipe: saveRecipeToStore, removeRecipe: removeRecipeFromStore,
     isLoaded,
   } = useSupabaseSync();
+
+  // ✅ Состояние генерации поднято сюда, чтобы не сбрасывалось при смене вкладок
+  const [chefPlan, setChefPlan] = useState<ChefPlan | null>(null);
+  const [generationState, setGenerationState] = useState<'idle' | 'generating' | 'success' | 'error'>('idle');
+  const [selectedCategories, setSelectedCategories] = useState<MealCategory[]>(['breakfast', 'soup', 'main', 'dessert']);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const saveRecipe = async (recipe: Recipe) => {
     await saveRecipeToStore(recipe);
@@ -46,63 +54,69 @@ export default function Home() {
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans pb-20 md:pb-0">
 
       {/* Mobile Navigation (Bottom) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 md:hidden pb-safe">
-        <div className="flex justify-around items-center p-2">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 md:hidden" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="flex justify-around items-center px-1 pt-2 pb-1">
           <button
             onClick={() => setActiveTab('fridge')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'fridge' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors min-w-[56px] ${activeTab === 'fridge' ? 'text-blue-600 bg-blue-50' : 'text-gray-400'}`}
           >
-            <Package size={24} />
-            <span className="text-[10px] font-medium mt-1">Холодильник</span>
+            <Package size={22} />
+            <span className="text-[10px] font-medium mt-0.5">Холодильник</span>
           </button>
           <button
             onClick={() => setActiveTab('family')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'family' ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors min-w-[56px] ${activeTab === 'family' ? 'text-green-600 bg-green-50' : 'text-gray-400'}`}
           >
-            <Users size={24} />
-            <span className="text-[10px] font-medium mt-1">Семья</span>
+            <Users size={22} />
+            <span className="text-[10px] font-medium mt-0.5">Семья</span>
           </button>
 
           {/* Main Action Button (Center) */}
-          <div className="relative -top-6">
+          <div className="relative -top-5 mx-1">
             <button
               onClick={() => setActiveTab('chef')}
               className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform active:scale-95 border-4 border-stone-50 ${activeTab === 'chef' ? 'bg-gradient-to-br from-orange-400 to-red-500 text-white' : 'bg-white text-gray-400'}`}
             >
-              <ChefHat size={28} />
+              <ChefHat size={26} />
             </button>
           </div>
 
           <button
             onClick={() => setActiveTab('recipes')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'recipes' ? 'text-purple-600 bg-purple-50' : 'text-gray-400'}`}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors min-w-[56px] ${activeTab === 'recipes' ? 'text-purple-600 bg-purple-50' : 'text-gray-400'}`}
           >
-            <BookOpen size={24} />
-            <span className="text-[10px] font-medium mt-1">Рецепты</span>
+            <BookOpen size={22} />
+            <span className="text-[10px] font-medium mt-0.5">Рецепты</span>
           </button>
 
           <button
             onClick={() => setActiveTab('shopping')}
-            className={`flex flex-col items-center p-2 rounded-xl transition-colors ${activeTab === 'shopping' ? 'text-orange-600 bg-orange-50' : 'text-gray-400'}`}
+            className={`flex flex-col items-center p-2 rounded-xl transition-colors min-w-[56px] ${activeTab === 'shopping' ? 'text-orange-600 bg-orange-50' : 'text-gray-400'}`}
           >
-            <ShoppingCart size={24} />
-            <span className="text-[10px] font-medium mt-1">Покупки</span>
+            <ShoppingCart size={22} />
+            <span className="text-[10px] font-medium mt-0.5">Покупки</span>
           </button>
         </div>
-        {/* Auth indicator (mobile) */}
-        {user ? (
-          <div className="absolute top-2 right-3">
-            <Link href="/dashboard" className="w-7 h-7 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold">
+
+        {/* Auth indicator (mobile) — улучшенный */}
+        <div className="absolute top-2 right-2">
+          {user ? (
+            <Link href="/dashboard"
+              className="w-8 h-8 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white text-[11px] font-bold shadow-md"
+              title="Личный кабинет"
+            >
               {user.email?.charAt(0).toUpperCase() || '?'}
             </Link>
-          </div>
-        ) : (
-          <div className="absolute top-2 right-3">
-            <Link href="/auth" className="w-7 h-7 bg-stone-200 rounded-full flex items-center justify-center text-stone-500">
-              <LogIn size={14} />
+          ) : (
+            <Link href="/auth"
+              className="flex items-center gap-1 bg-orange-500 text-white rounded-full px-3 py-1.5 text-[11px] font-bold shadow-md hover:bg-orange-600 transition-colors"
+              title="Войти"
+            >
+              <LogIn size={12} />
+              Войти
             </Link>
-          </div>
-        )}
+          )}
+        </div>
       </nav>
 
       {/* Desktop Layout Container */}
@@ -111,8 +125,8 @@ export default function Home() {
         {/* Sidebar (Desktop Only) */}
         <aside className="hidden md:flex flex-col w-64 bg-white rounded-3xl shadow-sm border border-gray-100 p-6">
           <div className="mb-10 flex items-center gap-3 px-2">
-            <div className="bg-orange-500 p-2 rounded-lg text-white">
-              <ChefHat size={24} />
+            <div className="w-10 h-10 flex items-center justify-center">
+              <img src="/logo-chef.svg" alt="Шеф-холодильник" className="w-10 h-10" />
             </div>
             <h1 className="font-extrabold text-xl tracking-tight text-gray-800">ШЕФ<br /><span className="text-orange-500">ХОЛОДИЛЬНИК</span></h1>
           </div>
@@ -183,6 +197,22 @@ export default function Home() {
                 <LogIn size={16} /> Войти
               </Link>
             )}
+
+            {/* PRO блок */}
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <Crown size={16} className="text-amber-500" />
+                <span className="text-sm font-bold text-amber-700">Шеф PRO</span>
+              </div>
+              <p className="text-[11px] text-amber-600 mb-2 leading-relaxed">Безлимитные рецепты, история меню и приоритетная поддержка</p>
+              <Link
+                href="/pricing"
+                className="w-full flex items-center justify-center gap-1 py-1.5 text-xs font-bold text-white bg-gradient-to-r from-amber-400 to-orange-500 rounded-lg hover:from-amber-500 hover:to-orange-600 transition-all"
+              >
+                <Zap size={12} /> Перейти на PRO
+              </Link>
+            </div>
+
             <div className="bg-stone-50 rounded-xl p-4 text-xs text-gray-500">
               <p className="font-bold text-gray-700 mb-1">Версия 2.0 (Next.js)</p>
               <p>Powered by OpenRouter AI</p>
@@ -199,6 +229,15 @@ export default function Home() {
                 family={family}
                 onSaveRecipe={saveRecipe}
                 savedRecipeIds={savedRecipes.map(r => r.id!)}
+                // ✅ Передаём поднятое состояние
+                plan={chefPlan}
+                setPlan={setChefPlan}
+                generationState={generationState}
+                setGenerationState={setGenerationState}
+                selectedCategories={selectedCategories}
+                setSelectedCategories={setSelectedCategories}
+                errorMessage={errorMessage}
+                setErrorMessage={setErrorMessage}
               />
             )}
             {activeTab === 'fridge' && (
@@ -220,9 +259,22 @@ export default function Home() {
               />
             )}
             {activeTab === 'shopping' && (
-              <ShoppingListPanel />
+              <ShoppingListPanel user={user} />
             )}
           </div>
+
+          {/* ✅ PRO-баннер для мобильных (появляется снизу на ChefPanel) */}
+          {activeTab === 'chef' && !user && (
+            <div className="md:hidden absolute bottom-0 left-0 right-0 bg-gradient-to-r from-amber-500 to-orange-500 text-white px-4 py-2 flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2">
+                <Crown size={16} />
+                <span className="font-bold">Шеф PRO — безлимитно</span>
+              </div>
+              <Link href="/pricing" className="bg-white text-orange-600 font-bold px-3 py-1 rounded-full text-xs">
+                Узнать
+              </Link>
+            </div>
+          )}
         </main>
       </div>
     </div>

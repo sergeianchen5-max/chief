@@ -3,22 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useUser } from '@/lib/hooks/useUser';
-import type { Recipe } from '@/lib/types';
 import {
     ChefHat, BookOpen, Crown, CalendarDays,
     Trash2, ArrowLeft, Loader2, Clock,
     Users as UsersIcon, Flame, LogIn
 } from 'lucide-react';
 import Link from 'next/link';
-
-interface ProfileData {
-    email: string | null;
-    display_name: string | null;
-    subscription_tier: string;
-    subscription_active: boolean;
-    daily_generations_count: number;
-    created_at: string;
-}
 
 interface SavedRecipeRow {
     recipe_id: string;
@@ -32,51 +22,44 @@ interface SavedRecipeRow {
 }
 
 export default function DashboardPage() {
-    const { user, loading: authLoading, signOut } = useUser();
-    const [profile, setProfile] = useState<ProfileData | null>(null);
+    // Берём профиль из useUser — больше не дублируем запрос к БД
+    const { user, profile, loading: authLoading, signOut } = useUser();
     const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRow[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [recipesLoading, setRecipesLoading] = useState(true);
     const [activeSection, setActiveSection] = useState<'recipes' | 'profile'>('recipes');
     const supabase = createClient();
 
     useEffect(() => {
         if (authLoading) return;
         if (!user) {
-            setLoading(false);
+            setRecipesLoading(false);
             return;
         }
 
-        const loadData = async () => {
-            // Загрузить профиль
-            const { data: profileData } = await supabase
-                .from('profiles')
-                .select('email, display_name, subscription_tier, subscription_active, daily_generations_count, created_at')
-                .eq('id', user.id)
-                .single();
+        const loadRecipes = async () => {
+            try {
+                const { data: recipesData, error } = await supabase
+                    .from('saved_recipes')
+                    .select('recipe_id, saved_at, recipes(id, title, content, created_at)')
+                    .eq('user_id', user.id)
+                    .order('saved_at', { ascending: false });
 
-            if (profileData) {
-                // HARDCODE: Override for specific test user
-                if (user.email === 'anchen-ser@yandex.ru') {
-                    profileData.subscription_tier = 'pro';
-                    profileData.daily_generations_count = 0; // Does not matter for PRO
+                if (error) {
+                    console.error('[Dashboard] Ошибка загрузки рецептов:', error);
+                } else if (recipesData) {
+                    setSavedRecipes(recipesData as any);
                 }
-                setProfile(profileData);
+            } catch (err) {
+                console.error('[Dashboard] Критическая ошибка loadRecipes:', err);
+            } finally {
+                // Гарантированно снимаем loading — даже при ошибке
+                setRecipesLoading(false);
             }
-
-            // Загрузить сохранённые рецепты
-            const { data: recipesData } = await supabase
-                .from('saved_recipes')
-                .select('recipe_id, saved_at, recipes(id, title, content, created_at)')
-                .eq('user_id', user.id)
-                .order('saved_at', { ascending: false });
-
-            if (recipesData) setSavedRecipes(recipesData as any);
-
-            setLoading(false);
         };
 
-        loadData();
-    }, [user, authLoading]);
+        loadRecipes();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.id, authLoading]);
 
     const removeRecipe = async (recipeId: string) => {
         if (!user || !window.confirm('Удалить рецепт из избранного?')) return;
@@ -90,8 +73,17 @@ export default function DashboardPage() {
         setSavedRecipes(prev => prev.filter(r => r.recipe_id !== recipeId));
     };
 
+    // ============= ЗАГРУЗКА =============
+    if (authLoading || (user && recipesLoading)) {
+        return (
+            <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+                <Loader2 className="animate-spin text-orange-500" size={40} />
+            </div>
+        );
+    }
+
     // ============= НЕАВТОРИЗОВАН =============
-    if (!authLoading && !user) {
+    if (!user) {
         return (
             <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
                 <div className="text-center max-w-md">
@@ -111,15 +103,7 @@ export default function DashboardPage() {
         );
     }
 
-    // ============= ЗАГРУЗКА =============
-    if (loading || authLoading) {
-        return (
-            <div className="min-h-screen bg-stone-50 flex items-center justify-center">
-                <Loader2 className="animate-spin text-orange-500" size={40} />
-            </div>
-        );
-    }
-
+    const isPro = profile?.subscription_tier === 'pro';
     const memberSince = profile?.created_at
         ? new Date(profile.created_at).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' })
         : '—';
@@ -138,13 +122,13 @@ export default function DashboardPage() {
                         </div>
                         <div>
                             <h1 className="font-bold text-stone-800 text-lg leading-tight">
-                                {user?.user_metadata?.full_name || user?.email?.split('@')[0]}
+                                {profile?.display_name || user?.user_metadata?.full_name || user?.email?.split('@')[0]}
                             </h1>
                             <p className="text-xs text-stone-400">{user?.email}</p>
                         </div>
                     </div>
                     <div className="ml-auto flex items-center gap-3">
-                        {profile?.subscription_tier === 'pro' ? (
+                        {isPro ? (
                             <span className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold rounded-full">
                                 <Crown size={12} /> PRO
                             </span>
@@ -276,14 +260,14 @@ export default function DashboardPage() {
                                 </div>
                                 <div className="flex justify-between items-center py-2 border-b border-stone-50">
                                     <span className="text-sm text-stone-500">Подписка</span>
-                                    <span className={`text-sm font-medium ${profile?.subscription_tier === 'pro' ? 'text-orange-500' : 'text-stone-700'}`}>
-                                        {profile?.subscription_tier === 'pro' ? '⭐ Pro' : 'Free'}
+                                    <span className={`text-sm font-medium ${isPro ? 'text-orange-500' : 'text-stone-700'}`}>
+                                        {isPro ? '⭐ Pro' : 'Free'}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center py-2 border-b border-stone-50">
                                     <span className="text-sm text-stone-500">Генерации сегодня</span>
                                     <span className="text-sm font-medium text-stone-700">
-                                        {profile?.daily_generations_count || 0} / {profile?.subscription_tier === 'pro' ? '∞' : '5'}
+                                        {profile?.daily_generations_count ?? 0} / {isPro ? '∞' : '5'}
                                     </span>
                                 </div>
                                 <div className="flex justify-between items-center py-2 border-b border-stone-50">
@@ -297,8 +281,8 @@ export default function DashboardPage() {
                             </div>
                         </div>
 
-                        {/* Подписка */}
-                        {profile?.subscription_tier !== 'pro' && (
+                        {/* Подписка — кнопка на /pricing */}
+                        {!isPro && (
                             <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-orange-100 p-6">
                                 <div className="flex items-center gap-2 mb-3">
                                     <Crown className="text-orange-500" size={20} />
@@ -307,12 +291,12 @@ export default function DashboardPage() {
                                 <p className="text-sm text-orange-600/80 mb-4">
                                     Безлимитные генерации, списки покупок, персонализация диеты и без рекламы — 199 ₽/мес
                                 </p>
-                                <button
-                                    disabled
-                                    className="px-5 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-semibold text-sm shadow-sm opacity-60 cursor-not-allowed"
+                                <Link
+                                    href="/pricing"
+                                    className="inline-flex px-5 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-semibold text-sm shadow-sm hover:shadow-md transition-all"
                                 >
-                                    Скоро
-                                </button>
+                                    Посмотреть планы
+                                </Link>
                             </div>
                         )}
                     </div>
