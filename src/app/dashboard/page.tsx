@@ -1,106 +1,19 @@
-'use client';
-
-import React, { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import { useUser } from '@/lib/hooks/useUser';
-import {
-    ChefHat, BookOpen, Crown, CalendarDays,
-    Trash2, ArrowLeft, Loader2, Clock,
-    Users as UsersIcon, Flame, LogIn
-} from 'lucide-react';
+import React from 'react';
+import { createClient } from '@/lib/supabase/server';
+import DashboardClient from './DashboardClient';
+import { ChefHat, LogIn } from 'lucide-react';
 import Link from 'next/link';
 
-interface SavedRecipeRow {
-    recipe_id: string;
-    saved_at: string;
-    recipes: {
-        id: string;
-        title: string;
-        content: any;
-        created_at: string;
-    };
-}
+export const dynamic = 'force-dynamic';
 
-export default function DashboardPage() {
-    // Берём профиль из useUser — больше не дублируем запрос к БД
-    const { user, profile, loading: authLoading, signOut } = useUser();
-    const [savedRecipes, setSavedRecipes] = useState<SavedRecipeRow[]>([]);
-    const [recipesLoading, setRecipesLoading] = useState(true);
-    const [activeSection, setActiveSection] = useState<'recipes' | 'profile'>('recipes');
-    const [recipesError, setRecipesError] = useState<string | null>(null);
-    const supabase = createClient();
+export default async function DashboardPage() {
+    const supabase = await createClient();
 
-    useEffect(() => {
-        if (authLoading) return;
-        if (!user) {
-            setRecipesLoading(false);
-            return;
-        }
-
-        const loadRecipes = async () => {
-            try {
-                // Пробуем с join на recipes
-                const { data: recipesData, error } = await supabase
-                    .from('saved_recipes')
-                    .select('recipe_id, saved_at, recipes(id, title, content, created_at)')
-                    .eq('user_id', user.id)
-                    .order('saved_at', { ascending: false });
-
-                if (error) {
-                    console.error('[Dashboard] Ошибка загрузки рецептов (join):', error);
-                    // Fallback — загружаем без join
-                    const { data: fallbackData } = await supabase
-                        .from('saved_recipes')
-                        .select('recipe_id, saved_at')
-                        .eq('user_id', user.id)
-                        .order('saved_at', { ascending: false });
-
-                    if (fallbackData) {
-                        setSavedRecipes(fallbackData.map((r: any) => ({
-                            recipe_id: r.recipe_id,
-                            saved_at: r.saved_at,
-                            recipes: { id: r.recipe_id, title: 'Рецепт', content: {}, created_at: r.saved_at }
-                        })) as any);
-                    }
-                } else if (recipesData) {
-                    setSavedRecipes(recipesData as any);
-                }
-            } catch (err) {
-                console.error('[Dashboard] Критическая ошибка loadRecipes:', err);
-                setRecipesError('Не удалось загрузить рецепты');
-            } finally {
-                setRecipesLoading(false);
-            }
-        };
-
-        loadRecipes();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [user?.id, authLoading]);
-
-    const removeRecipe = async (recipeId: string) => {
-        if (!user || !window.confirm('Удалить рецепт из избранного?')) return;
-
-        await supabase
-            .from('saved_recipes')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('recipe_id', recipeId);
-
-        setSavedRecipes(prev => prev.filter(r => r.recipe_id !== recipeId));
-    };
-
-    // ============= ЗАГРУЗКА =============
-    if (authLoading || (user && recipesLoading)) {
-        return (
-            <div className="min-h-screen bg-stone-50 flex flex-col items-center justify-center gap-3">
-                <Loader2 className="animate-spin text-orange-500" size={40} />
-                <p className="text-stone-400 text-sm">Загружаем ваши данные...</p>
-            </div>
-        );
-    }
+    // Получаем сессию на стороне сервера (безопасный вызов getUser, который валидирует токен)
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     // ============= НЕАВТОРИЗОВАН =============
-    if (!user) {
+    if (!user || authError) {
         return (
             <div className="min-h-screen bg-stone-50 flex items-center justify-center p-4">
                 <div className="text-center max-w-md">
@@ -120,205 +33,47 @@ export default function DashboardPage() {
         );
     }
 
-    const isPro = profile?.subscription_tier === 'pro';
-    const memberSince = profile?.created_at
-        ? new Date(profile.created_at).toLocaleDateString('ru-RU', { year: 'numeric', month: 'long', day: 'numeric' })
-        : '—';
+    // Загружаем профиль
+    const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+
+    // Загружаем рецепты (с join)
+    let initialRecipes: any[] = [];
+    const { data: recipesData, error } = await supabase
+        .from('saved_recipes')
+        .select('recipe_id, saved_at, recipes(id, title, content, created_at)')
+        .eq('user_id', user.id)
+        .order('saved_at', { ascending: false });
+
+    if (error) {
+        console.error('[Dashboard Server] Ошибка загрузки рецептов (join):', error);
+        // Fallback
+        const { data: fallbackData } = await supabase
+            .from('saved_recipes')
+            .select('recipe_id, saved_at')
+            .eq('user_id', user.id)
+            .order('saved_at', { ascending: false });
+
+        if (fallbackData) {
+            initialRecipes = fallbackData.map((r: any) => ({
+                recipe_id: r.recipe_id,
+                saved_at: r.saved_at,
+                recipes: { id: r.recipe_id, title: 'Рецепт', content: {}, created_at: r.saved_at }
+            }));
+        }
+    } else if (recipesData) {
+        initialRecipes = recipesData;
+    }
 
     return (
-        <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
-            {/* Шапка */}
-            <header className="bg-white border-b border-stone-100 sticky top-0 z-40">
-                <div className="max-w-5xl mx-auto px-4 py-4 flex items-center gap-4">
-                    <Link href="/" className="text-stone-400 hover:text-stone-600 transition-colors">
-                        <ArrowLeft size={20} />
-                    </Link>
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white font-bold">
-                            {user?.email?.charAt(0).toUpperCase() || '?'}
-                        </div>
-                        <div>
-                            <h1 className="font-bold text-stone-800 text-lg leading-tight">
-                                {profile?.display_name || user?.user_metadata?.full_name || user?.email?.split('@')[0]}
-                            </h1>
-                            <p className="text-xs text-stone-400">{user?.email}</p>
-                        </div>
-                    </div>
-                    <div className="ml-auto flex items-center gap-3">
-                        {isPro ? (
-                            <span className="flex items-center gap-1 px-3 py-1 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold rounded-full">
-                                <Crown size={12} /> PRO
-                            </span>
-                        ) : (
-                            <span className="px-3 py-1 bg-stone-100 text-stone-500 text-xs font-medium rounded-full">
-                                Free
-                            </span>
-                        )}
-                        <button
-                            onClick={signOut}
-                            className="text-xs text-stone-400 hover:text-red-500 transition-colors"
-                        >
-                            Выйти
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            <div className="max-w-5xl mx-auto px-4 py-6">
-                {/* Переключатель секций */}
-                <div className="flex gap-2 mb-6">
-                    <button
-                        onClick={() => setActiveSection('recipes')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${activeSection === 'recipes'
-                            ? 'bg-orange-50 text-orange-600 shadow-sm'
-                            : 'text-stone-400 hover:bg-stone-100'
-                            }`}
-                    >
-                        <BookOpen size={16} /> Мои рецепты
-                        <span className="bg-white/80 text-orange-500 text-xs px-2 py-0.5 rounded-full">{savedRecipes.length}</span>
-                    </button>
-                    <button
-                        onClick={() => setActiveSection('profile')}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all ${activeSection === 'profile'
-                            ? 'bg-blue-50 text-blue-600 shadow-sm'
-                            : 'text-stone-400 hover:bg-stone-100'
-                            }`}
-                    >
-                        <UsersIcon size={16} /> Профиль
-                    </button>
-                </div>
-
-                {/* ============= РЕЦЕПТЫ ============= */}
-                {activeSection === 'recipes' && (
-                    <div>
-                        {savedRecipes.length === 0 ? (
-                            <div className="bg-white rounded-2xl border border-stone-100 p-12 text-center">
-                                <BookOpen className="mx-auto text-stone-300 mb-4" size={48} />
-                                <h2 className="font-bold text-stone-600 text-lg mb-2">Пока пусто</h2>
-                                <p className="text-stone-400 text-sm mb-6">Сохраняйте рецепты из Шеф-Повара, чтобы они появились здесь</p>
-                                <Link
-                                    href="/"
-                                    className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-orange-400 to-red-500 text-white rounded-xl font-semibold text-sm shadow-sm hover:shadow-md transition-all"
-                                >
-                                    <ChefHat size={16} /> Перейти к Шеф-Повару
-                                </Link>
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {savedRecipes.map((item) => {
-                                    const content = item.recipes?.content as any;
-                                    if (!content) return null;
-
-                                    const savedDate = new Date(item.saved_at).toLocaleDateString('ru-RU', {
-                                        day: 'numeric', month: 'short'
-                                    });
-
-                                    return (
-                                        <div
-                                            key={item.recipe_id}
-                                            className="bg-white rounded-2xl border border-stone-100 p-5 hover:shadow-sm transition-shadow group"
-                                        >
-                                            <div className="flex items-start gap-4">
-                                                {/* Иконка */}
-                                                <div className="w-12 h-12 bg-gradient-to-br from-orange-100 to-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
-                                                    <Flame className="text-orange-500" size={22} />
-                                                </div>
-
-                                                {/* Контент */}
-                                                <div className="flex-1 min-w-0">
-                                                    <h3 className="font-bold text-stone-800 truncate">{content.name || item.recipes.title}</h3>
-                                                    <p className="text-sm text-stone-400 line-clamp-2 mt-1">{content.description || ''}</p>
-
-                                                    <div className="flex items-center gap-4 mt-3 text-xs text-stone-400">
-                                                        {content.cookingTimeMinutes && (
-                                                            <span className="flex items-center gap-1">
-                                                                <Clock size={12} /> {content.cookingTimeMinutes} мин
-                                                            </span>
-                                                        )}
-                                                        {content.difficulty && (
-                                                            <span className="px-2 py-0.5 bg-stone-100 rounded-full">{content.difficulty}</span>
-                                                        )}
-                                                        {content.caloriesPerServing && (
-                                                            <span>{content.caloriesPerServing}</span>
-                                                        )}
-                                                        <span className="flex items-center gap-1">
-                                                            <CalendarDays size={12} /> {savedDate}
-                                                        </span>
-                                                    </div>
-                                                </div>
-
-                                                {/* Удалить */}
-                                                <button
-                                                    onClick={() => removeRecipe(item.recipe_id)}
-                                                    className="opacity-0 group-hover:opacity-100 p-2 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                                    title="Удалить из избранного"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                {/* ============= ПРОФИЛЬ ============= */}
-                {activeSection === 'profile' && (
-                    <div className="space-y-4">
-                        {/* Информация */}
-                        <div className="bg-white rounded-2xl border border-stone-100 p-6">
-                            <h2 className="font-bold text-stone-700 mb-4">Информация</h2>
-                            <div className="space-y-3">
-                                <div className="flex justify-between items-center py-2 border-b border-stone-50">
-                                    <span className="text-sm text-stone-500">Email</span>
-                                    <span className="text-sm font-medium text-stone-700">{user?.email}</span>
-                                </div>
-                                <div className="flex justify-between items-center py-2 border-b border-stone-50">
-                                    <span className="text-sm text-stone-500">Подписка</span>
-                                    <span className={`text-sm font-medium ${isPro ? 'text-orange-500' : 'text-stone-700'}`}>
-                                        {isPro ? '⭐ Pro' : 'Free'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center py-2 border-b border-stone-50">
-                                    <span className="text-sm text-stone-500">Генерации сегодня</span>
-                                    <span className="text-sm font-medium text-stone-700">
-                                        {profile?.daily_generations_count ?? 0} / {isPro ? '∞' : '5'}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between items-center py-2 border-b border-stone-50">
-                                    <span className="text-sm text-stone-500">Сохранено рецептов</span>
-                                    <span className="text-sm font-medium text-stone-700">{savedRecipes.length}</span>
-                                </div>
-                                <div className="flex justify-between items-center py-2">
-                                    <span className="text-sm text-stone-500">Дата регистрации</span>
-                                    <span className="text-sm font-medium text-stone-700">{memberSince}</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Подписка — кнопка на /pricing */}
-                        {!isPro && (
-                            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-orange-100 p-6">
-                                <div className="flex items-center gap-2 mb-3">
-                                    <Crown className="text-orange-500" size={20} />
-                                    <h2 className="font-bold text-orange-700">Перейти на Pro</h2>
-                                </div>
-                                <p className="text-sm text-orange-600/80 mb-4">
-                                    Безлимитные генерации, списки покупок, персонализация диеты и без рекламы — 199 ₽/мес
-                                </p>
-                                <Link
-                                    href="/pricing"
-                                    className="inline-flex px-5 py-2.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white rounded-xl font-semibold text-sm shadow-sm hover:shadow-md transition-all"
-                                >
-                                    Посмотреть планы
-                                </Link>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-        </div>
+        <DashboardClient
+            user={user}
+            profile={profile || null}
+            initialRecipes={initialRecipes}
+        />
     );
 }
+
